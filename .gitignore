@@ -1,0 +1,7 @@
+build*/
+out*/
+compile_commands.json
+__pycache__/
+.cache/
+.vscode/
+.idea/

@@ -1,0 +1,11 @@
+# Targets placed on the boundaries of the measurement space.
+range_m,velocity_mps,azimuth_deg,rcs_dbsm
+# very close (range-axis edge of the CFAR window)
+3,1.0,0,5
+# near the velocity ambiguity limit (Doppler-axis wrap)
+80,-68.5,-10,20
+80,68.5,10,20
+# near the maximum range
+245,-5.0,0,25
+# wide angle
+40,0.0,55,15
