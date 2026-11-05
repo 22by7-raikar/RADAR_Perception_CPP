@@ -1,0 +1,31 @@
+# Regression bounds: <metric> <min|max> <value>
+# Measured values at the time of writing are noted on the right; bounds leave
+# margin for platform differences (compiler, libm, CPU) but catch real regressions.
+
+# Point cloud: multi_target.csv, 20 frames
+point_cloud.detection_rate              min 0.99    # 1.00
+point_cloud.false_alarms_per_frame      max 0.20    # 0.00
+point_cloud.range_mae_m                 max 0.20    # 0.105
+point_cloud.velocity_mae_mps            max 0.05    # 0.017
+point_cloud.azimuth_mae_deg             max 0.10    # 0.028
+point_cloud.latency_mean_ms             max 15.0    # 3.5 on a 2.8 GHz x86-64 core
+
+# Tracking: intersection scenario, 6 s
+tracking.mota                           min 0.45    # 0.553
+tracking.recall                         min 0.72    # 0.810
+tracking.id_switches                    max 10      # 3
+tracking.velocity_error_mps             max 1.20    # 0.876
+tracking.vehicle_class_accuracy         min 0.93    # 0.983
+
+# Ego-motion: ego_drive scenario, 15 s
+odometry.ego_velocity_valid_fraction    min 0.98    # 1.00
+odometry.ego_velocity_rmse_mps          max 0.12    # 0.084
+odometry.fused_final_error_m            max 2.50    # 0.81
+odometry.fused_final_yaw_error_deg      max 1.20    # 0.38
+odometry.imu_only_to_fused_error_ratio  min 4.0     # 12.1
+odometry.gyro_bias_error_radps          max 0.004   # 0.0023
+
+# Radar-camera extrinsic calibration
+calibration.rotation_error_deg          max 0.25    # 0.081
+calibration.translation_error_m         max 0.08    # 0.029
+calibration.reprojection_rms_px         max 3.0     # 1.58

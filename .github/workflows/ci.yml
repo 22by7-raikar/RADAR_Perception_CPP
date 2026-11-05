@@ -39,8 +39,17 @@ jobs:
           -DRP_WARNINGS_AS_ERRORS=ON
       - name: Build
         run: cmake --build build --parallel
-      - name: Test
-        run: ctest --test-dir build --output-on-failure
+      - name: Unit tests
+        run: ctest --test-dir build -L unit --output-on-failure
+      - name: Regression suite
+        working-directory: build/tests
+        run: ./radar_regression
+      - name: Upload regression report
+        if: always() && matrix.compiler == 'gcc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-report
+          path: build/tests/regression_report.md
       - name: Demo
         run: |
           ./build/radar_demo --frames 20 --out build/out
@@ -70,4 +79,50 @@ jobs:
       - name: Test
         env:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build -L unit --output-on-failure
+
+  arm64:
+    name: aarch64 cross-compile (tests under QEMU)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross toolchain
+        run: >
+          sudo apt-get update && sudo apt-get install -y ninja-build libeigen3-dev
+          g++-aarch64-linux-gnu qemu-user
+      - name: Configure
+        run: >
+          cmake -S . -B build-arm64 -G Ninja
+          -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/aarch64-linux-gnu.cmake
+          -DRP_WARNINGS_AS_ERRORS=ON -DRP_BUILD_BENCHMARKS=OFF
+      - name: Build
+        run: cmake --build build-arm64 --parallel
+      - name: Unit tests (QEMU)
+        env:
+          RP_SKIP_TIMING: "1"
+        run: ctest --test-dir build-arm64 -L unit --output-on-failure
+
+  ros2:
+    name: ROS 2 Jazzy (build + launch smoke test)
+    runs-on: ubuntu-24.04
+    container: ros:jazzy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: >
+          apt-get update && apt-get install -y ninja-build libeigen3-dev
+          ros-jazzy-visualization-msgs ros-jazzy-tf2-ros ros-jazzy-ros2launch
+      - name: Build and install the core library
+        run: |
+          cmake -S . -B build -G Ninja -DRP_BUILD_TESTS=OFF -DRP_BUILD_BENCHMARKS=OFF -DRP_BUILD_APPS=OFF
+          cmake --build build --parallel
+          cmake --install build --prefix /opt/radar_perception
+      - name: colcon build
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon build --base-paths ros2 --event-handlers console_direct+ \
+            --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/radar_perception
+      - name: Launch smoke test
+        shell: bash
+        run: ./scripts/ros2_smoke_test.sh

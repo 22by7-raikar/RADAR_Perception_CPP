@@ -299,6 +299,80 @@ can't be reached from the build environment. The interfaces (`CameraModel`,
 `CameraDetection`, timestamps, `SensorState`) are what a dataset loader would
 fill in.
 
+## Deployment
+
+### ROS 2
+
+`ros2/` has two packages: `radar_perception_msgs` and `radar_perception_ros`.
+The nodes are thin wrappers around the library:
+
+| Node | Subscribes | Publishes |
+|---|---|---|
+| `sim_source_node` | – | `radar/cube` (20 Hz), `imu` (100 Hz), `/clock`, ground truth |
+| `radar_perception_node` | `radar/cube`, `ego/odometry` | `radar/detections` (PointCloud2: x, y, z, velocity, snr, rcs), `radar/ego_velocity`, `radar/tracks`, `radar/track_markers`, `radar/processing_time_ms` |
+| `ego_estimator_node` | `imu`, `radar/ego_velocity` | `ego/odometry`, TF `odom → base_link`, static TF `base_link → radar` |
+
+A real radar driver would replace `sim_source_node` by publishing
+`RadarCube` messages. The simulator publishes `/clock`, so the rest of the
+graph runs on simulation time at whatever speed the machine sustains.
+
+```bash
+# 1. build and install the core library
+cmake -S . -B build -DRP_BUILD_TESTS=OFF -DRP_BUILD_BENCHMARKS=OFF -DRP_BUILD_APPS=OFF
+cmake --build build && cmake --install build --prefix ~/radar_perception
+# 2. build the ROS packages
+source /opt/ros/jazzy/setup.bash
+colcon build --base-paths ros2 --cmake-args -DCMAKE_PREFIX_PATH=$HOME/radar_perception
+# 3. run
+source install/setup.bash
+ros2 launch radar_perception_ros demo.launch.py
+```
+
+In CI, a `ros:jazzy` container builds both packages, launches the graph, and
+checks that every output topic publishes (`scripts/ros2_smoke_test.sh`).
+
+### ARM64 and embedded targets
+
+```bash
+cmake -S . -B build-arm64 -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/aarch64-linux-gnu.cmake \
+  -DRP_TARGET_CPU=cortex-a78ae        # optional, e.g. Jetson Orin
+cmake --build build-arm64
+ctest --test-dir build-arm64 -L unit   # runs under qemu-aarch64 when installed
+```
+
+CI cross-compiles for aarch64 with `-Werror` and runs all unit tests under
+QEMU user-mode emulation. Emulated timings mean nothing, so latency numbers
+for a real board have to come from running `radar_bench` on it. The library
+has no dynamic allocation in steady state, no exceptions on the hot path and
+no threads of its own, so a caller can pin it to a core.
+
+### Using it from another CMake project
+
+```cmake
+find_package(radar_perception 0.1 REQUIRED)
+target_link_libraries(my_app PRIVATE radar::core)
+```
+
+Consumers only inherit Eigen. Warning flags, sanitizers and pocketfft stay
+private to the build.
+
+### Regression suite
+
+`tests/regression/` runs fixed-seed versions of every experiment (point
+cloud, tracking, odometry, calibration) and checks 20 metrics against
+`thresholds.txt`. Each bound sits above or below the current value with
+margin, so a change that degrades accuracy fails CI even when every unit
+test still passes. CI uploads the measured-vs-bound table
+(`regression_report.md`) as an artifact.
+
+```bash
+ctest --test-dir build -L regression        # pass/fail
+(cd build/tests && ./radar_regression)      # one process -> full report
+```
+
+Latency budgets are skipped with `RP_SKIP_TIMING=1` (emulators, sanitizers).
+
 ## Layout
 
 ```
@@ -309,7 +383,10 @@ include/radar/   Signal: config, simulator, range_doppler, cfar, angle, pipeline
                  Utilities: evaluation, io
 src/             Implementation
 apps/            radar_demo, tracking_demo, odometry_demo, fusion_demo
-tests/           GoogleTest suite (76 tests)
+tests/           GoogleTest unit suite (76 tests) + regression/ (scenario metrics vs. thresholds)
+ros2/            radar_perception_msgs, radar_perception_ros (nodes, launch, params)
+cmake/           dependencies, package config, toolchains/aarch64-linux-gnu.cmake
+scripts/         ros2_smoke_test.sh
 bench/           Google Benchmark suite
 scenarios/       Target scenarios (CSV)
 tools/           plot_{results,tracking,odometry,fusion}.py: figures from demo output
@@ -372,7 +449,8 @@ processing does not allocate.
 - [x] **Object level:** DBSCAN clustering in (x, y, v), multi-target tracking (EKF with track management), classification
 - [x] **Ego-motion:** ego-velocity from stationary-point Doppler (RANSAC), fused with an IMU in an error-state Kalman filter
 - [x] **Camera fusion:** extrinsic calibration, time sync, projection and association (synthetic data; dataset loader still to do)
-- [ ] **Deployment:** ROS 2 nodes, ARM64 cross-compilation, embedded latency profiling, data-driven regression tests
+- [x] **Deployment:** ROS 2 nodes, ARM64 cross-compilation, installable CMake package, data-driven regression tests
+- [ ] **Real data:** loader for a public radar + camera dataset, and latency profiling on a physical ARM board
 - [ ] **Performance:** TDM-MIMO virtual array, multithreaded per-channel FFTs
 
 ## License

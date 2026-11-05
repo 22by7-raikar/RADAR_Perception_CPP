@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>radar_perception_ros</name>
+  <version>0.1.0</version>
+  <description>ROS 2 nodes for the radar perception stack: simulated sensor source,
+    radar perception (point cloud, ego-velocity, tracks) and IMU/radar ego-motion.</description>
+  <maintainer email="akshaypairaikar@gmail.com">22by7-raikar</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>rosgraph_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>radar_perception_msgs</depend>
+  <depend>eigen</depend>
+  <!-- The core C++ library (radar::core) is found with find_package(radar_perception);
+       build and install it from the repository root first (see README). -->
+
+  <exec_depend>ros2launch</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -14,8 +14,17 @@ add_executable(radar_tests
   test_tracker.cpp
   test_window.cpp
 )
-target_link_libraries(radar_tests PRIVATE radar::core GTest::gtest_main)
+target_link_libraries(radar_tests PRIVATE radar::core rp_options GTest::gtest_main)
 target_compile_definitions(radar_tests PRIVATE RP_SCENARIO_DIR="${PROJECT_SOURCE_DIR}/scenarios")
 
 include(GoogleTest)
-gtest_discover_tests(radar_tests)
+gtest_discover_tests(radar_tests DISCOVERY_TIMEOUT 120 PROPERTIES LABELS unit)
+
+# Scenario-level regression suite: fixed seeds, metrics checked against
+# tests/regression/thresholds.txt. Slow under sanitizers; select with -L regression.
+add_executable(radar_regression regression/test_regression.cpp)
+target_link_libraries(radar_regression PRIVATE radar::core rp_options GTest::gtest_main)
+target_compile_definitions(radar_regression PRIVATE
+  RP_SCENARIO_DIR="${PROJECT_SOURCE_DIR}/scenarios"
+  RP_THRESHOLDS_FILE="${CMAKE_CURRENT_SOURCE_DIR}/regression/thresholds.txt")
+gtest_discover_tests(radar_regression DISCOVERY_TIMEOUT 120 PROPERTIES LABELS regression TIMEOUT 600)

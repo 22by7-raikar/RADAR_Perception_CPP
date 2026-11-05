@@ -1,0 +1,25 @@
+# Shared parameters. The radar mount (base_link -> radar) must match between
+# the perception and ego-motion nodes; it is the extrinsic calibration.
+radar_sim_source:
+  ros__parameters:
+    scenario: ego_drive
+    duration: 30.0
+    seed: 3
+
+radar_perception:
+  ros__parameters:
+    mount_x: 3.6
+    mount_y: 0.0
+    mount_yaw: 0.0
+    rcs_offset_db: 101.6
+    cfar_pfa: 1.0e-6
+    odom_frame: odom
+
+ego_estimator:
+  ros__parameters:
+    mount_x: 3.6
+    mount_y: 0.0
+    mount_yaw: 0.0
+    odom_frame: odom
+    base_frame: base_link
+    radar_frame: radar
