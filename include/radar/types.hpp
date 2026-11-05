@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <complex>
 #include <cstddef>
 #include <vector>
@@ -7,6 +8,11 @@
 namespace radar {
 
 using cfloat = std::complex<float>;
+
+/// |z|^2 without the hypot() round trip that std::norm takes in libstdc++.
+inline float squared_magnitude(const cfloat& z) {
+  return z.real() * z.real() + z.imag() * z.imag();
+}
 
 /// Dense, row-major 2D array.
 template <typename T>

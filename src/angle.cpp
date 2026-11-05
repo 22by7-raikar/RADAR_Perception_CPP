@@ -34,7 +34,7 @@ AngleEstimate AngleEstimator::estimate(const DataCube& spectrum, std::size_t ran
 
   std::size_t peak = 0;
   for (std::size_t i = 0; i < n; ++i) {
-    power_[i] = std::norm(buffer_[i]);
+    power_[i] = squared_magnitude(buffer_[i]);
     if (power_[i] > power_[peak]) peak = i;
   }
   const double delta =

@@ -59,7 +59,7 @@ Google Benchmark, single thread, 4-core 2.8 GHz x86-64 VM, Release build:
 | Stage | Time |
 |---|---|
 | Range-Doppler FFT (8 × 128 × 256 complex) | 1.6 ms |
-| Non-coherent integration | 0.5 ms |
+| Non-coherent integration | 0.18 ms (was 0.49 ms before removing `std::norm` and strided writes) |
 | 2D CA-CFAR (32k cells) | 0.3 ms |
 | Full pipeline | 2.6 ms |
 
@@ -185,7 +185,7 @@ processing does not allocate.
 - [ ] **Ego-motion:** ego-velocity from stationary-point Doppler (RANSAC), fused with an IMU in an error-state Kalman filter
 - [ ] **Camera fusion:** extrinsic calibration, time sync and projecting radar points into images, on public radar + camera data
 - [ ] **Deployment:** ROS 2 nodes, ARM64 cross-compilation, embedded latency profiling, data-driven regression tests
-- [ ] **Performance:** cache-friendly integration layout, TDM-MIMO virtual array, multithreaded per-channel FFTs
+- [ ] **Performance:** TDM-MIMO virtual array, multithreaded per-channel FFTs
 
 ## License
 

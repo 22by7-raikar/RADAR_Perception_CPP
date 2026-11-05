@@ -2,6 +2,7 @@
 
 #include <pocketfft_hdronly.h>
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace radar {
@@ -62,13 +63,18 @@ void integrate_power(const DataCube& spectrum, Grid2D<float>& power) {
   const std::size_t nd = spectrum.num_chirps();
   const std::size_t nr = spectrum.num_samples();
   if (power.rows() != nr || power.cols() != nd) power.resize(nr, nd);
-  power.fill(0.0f);
 
-  for (std::size_t k = 0; k < nrx; ++k) {
-    for (std::size_t d = 0; d < nd; ++d) {
+  // Accumulate each Doppler row contiguously across channels, then write the
+  // column once. Avoids std::norm, which libstdc++ implements via hypot().
+  thread_local std::vector<float> acc;
+  acc.resize(nr);
+  for (std::size_t d = 0; d < nd; ++d) {
+    std::fill(acc.begin(), acc.end(), 0.0f);
+    for (std::size_t k = 0; k < nrx; ++k) {
       const cfloat* row = &spectrum(k, d, 0);
-      for (std::size_t r = 0; r < nr; ++r) power(r, d) += std::norm(row[r]);
+      for (std::size_t r = 0; r < nr; ++r) acc[r] += squared_magnitude(row[r]);
     }
+    for (std::size_t r = 0; r < nr; ++r) power(r, d) = acc[r];
   }
 }
 
