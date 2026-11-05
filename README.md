@@ -15,8 +15,9 @@ simulator, unit tests, benchmarks and CI.
   integration over channels → 2D CA-CFAR → multi-peak angle FFT → 3D peak
   grouping → point cloud → DBSCAN clusters → EKF multi-object tracks with a
   class label.
-- **About 3 ms per frame** on one CPU core, for 256 samples × 128 chirps × 8
-  receive channels. That is under 6% of a 20 Hz frame budget.
+- **About 3–4 ms per frame** for the signal chain on one CPU core, for 256
+  samples × 128 chirps × 8 receive channels, plus about 0.3 ms for
+  clustering and tracking. That is under 10% of a 20 Hz frame budget.
 - **CFAR set by false-alarm rate.** The threshold multiplier is solved
   exactly for square-law detection with *K* integrated looks. You set a
   target Pfa, not a hand-tuned dB offset. A test checks that the measured
@@ -43,7 +44,7 @@ frames at 20 Hz:
 | Mean absolute range error | 0.11 m (bin size 1.0 m) |
 | Mean absolute velocity error | 0.02 m/s (bin size 1.09 m/s) |
 | Mean absolute azimuth error | 0.02° |
-| Latency, mean / p99 | ≈ 3 ms / ≈ 5 ms |
+| Latency, mean / p99 | ≈ 3.8 ms / ≈ 6.6 ms |
 
 ![Range-Doppler map](docs/images/range_doppler_map.png)
 
@@ -59,10 +60,11 @@ Google Benchmark, single thread, 4-core 2.8 GHz x86-64 VM, Release build:
 
 | Stage | Time |
 |---|---|
-| Range-Doppler FFT (8 × 128 × 256 complex) | 1.6 ms |
+| Range-Doppler FFT (8 × 128 × 256 complex) | 1.8 ms |
 | Non-coherent integration | 0.18 ms (was 0.49 ms before removing `std::norm` and strided writes) |
-| 2D CA-CFAR (32k cells) | 0.3 ms |
-| Full pipeline | 2.6 ms |
+| 2D CA-CFAR (32k cells) | 0.26 ms |
+| Angle FFTs, 3D peak grouping, beam refinement, noise floor | 0.6 ms |
+| Full pipeline | 3.1 ms |
 
 ## Radar configuration
 
