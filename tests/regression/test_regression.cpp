@@ -208,7 +208,7 @@ TEST(Regression, Odometry) {
 
   DataCube adc;
   FrameResult res;
-  double vel_sq = 0.0;
+  double vel_sq = 0.0, fused_sq = 0.0, imu_sq = 0.0;
   std::size_t vel_n = 0, valid = 0, frames = 0;
   const auto steps = static_cast<int>(duration / 0.01);
   for (int k = 0; k <= steps; ++k) {
@@ -228,19 +228,24 @@ TEST(Regression, Odometry) {
         ++vel_n;
         fused.update_radar_velocity(e.velocity, e.covariance);
       }
+      const Vec2 p = sf.ego.pose.translation();
+      fused_sq += (fused.pose().translation() - p).squaredNorm();
+      imu_sq += (imu_only.pose().translation() - p).squaredNorm();
     }
     if (k < steps) scene.step(0.01);
   }
+  // RMSE over the run rather than the final error: a single end-point sample
+  // swings with tiny floating-point differences between compilers.
   const Pose2D truth = scene.ego().pose;
-  const double fused_err = (fused.pose().translation() - truth.translation()).norm();
-  const double imu_err = (imu_only.pose().translation() - truth.translation()).norm();
+  const double fused_rmse = std::sqrt(fused_sq / static_cast<double>(frames));
+  const double imu_rmse = std::sqrt(imu_sq / static_cast<double>(frames));
   check("odometry.ego_velocity_valid_fraction",
         static_cast<double>(valid) / static_cast<double>(frames));
   check("odometry.ego_velocity_rmse_mps", std::sqrt(vel_sq / static_cast<double>(vel_n)));
-  check("odometry.fused_final_error_m", fused_err);
+  check("odometry.fused_position_rmse_m", fused_rmse);
   check("odometry.fused_final_yaw_error_deg",
         std::abs(wrap_angle(fused.pose().yaw - truth.yaw)) / kDeg);
-  check("odometry.imu_only_to_fused_error_ratio", imu_err / std::max(1e-3, fused_err));
+  check("odometry.imu_only_to_fused_rmse_ratio", imu_rmse / std::max(1e-3, fused_rmse));
   check("odometry.gyro_bias_error_radps", std::abs(fused.gyro_bias() - imu.gyro_bias()));
 }
 
