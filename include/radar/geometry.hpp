@@ -37,6 +37,10 @@ struct Pose2D {
   Vec2 to_local(const Vec2& parent) const {
     return rotation_matrix().transpose() * (parent - translation());
   }
+  Pose2D inverse() const {
+    const Vec2 t = -(rotation_matrix().transpose() * translation());
+    return {t.x(), t.y(), wrap_angle(-yaw)};
+  }
   /// this ∘ child: pose of `child` (given in this frame) expressed in the parent frame.
   Pose2D compose(const Pose2D& child) const {
     const Vec2 t = to_parent(child.translation());

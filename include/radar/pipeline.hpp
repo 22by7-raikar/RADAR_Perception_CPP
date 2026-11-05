@@ -85,7 +85,9 @@ class RadarPipeline {
   std::vector<Candidate> candidates_;
   std::vector<std::size_t> cell_first_;  ///< candidates of cell i: [first[i], first[i+1])
   std::vector<char> keep_;
-  Grid2D<int> cell_lookup_;  ///< (range, doppler) -> CFAR cell index, -1 if none
+  Grid2D<int> cell_lookup_;
+  std::vector<cfloat> steering_;  ///< conjugate steering vector of the current peak  ///< (range,
+                                  ///< doppler) -> CFAR cell index, -1 if none
   std::vector<float> scratch_;
 };
 

@@ -39,7 +39,10 @@ add_library(radar_core
   src/cfar.cpp
   src/clustering.cpp
   src/config.cpp
+  src/ego_estimator.cpp
+  src/ego_velocity.cpp
   src/evaluation.cpp
+  src/imu.cpp
   src/io.cpp
   src/pipeline.cpp
   src/range_doppler.cpp
@@ -59,6 +62,8 @@ if(RP_BUILD_APPS)
   target_link_libraries(radar_demo PRIVATE radar::core)
   add_executable(tracking_demo apps/tracking_demo.cpp)
   target_link_libraries(tracking_demo PRIVATE radar::core)
+  add_executable(odometry_demo apps/odometry_demo.cpp)
+  target_link_libraries(odometry_demo PRIVATE radar::core)
 endif()
 
 if(RP_BUILD_TESTS)

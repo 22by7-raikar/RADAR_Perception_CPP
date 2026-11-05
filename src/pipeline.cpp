@@ -30,7 +30,8 @@ RadarPipeline::RadarPipeline(const RadarConfig& radar, const PipelineConfig& cfg
       cfar_(with_looks(cfg.cfar, radar.num_rx)),
       angle_(radar, cfg.angle),
       spectrum_(radar.num_rx, radar.chirps_per_frame, radar.samples_per_chirp),
-      power_(radar.samples_per_chirp, radar.chirps_per_frame) {}
+      power_(radar.samples_per_chirp, radar.chirps_per_frame),
+      steering_(radar.num_rx) {}
 
 void RadarPipeline::process(const DataCube& adc, FrameResult& result) {
   result.detections.clear();
@@ -118,12 +119,41 @@ void RadarPipeline::process(const DataCube& adc, FrameResult& result) {
     const std::size_t r = cells_[cand.cell].range_bin;
     const std::size_t d = cells_[cand.cell].doppler_bin;
 
-    double dr = 0.0;
-    if (r > 0 && r + 1 < nr) {
-      dr = log_parabolic_offset(power_(r - 1, d), power_(r, d), power_(r + 1, d));
+    // Refine range and Doppler on the beam steered at this peak's azimuth,
+    // not on the channel-summed power: two reflectors sharing a cell then each
+    // get their own sub-bin position. The beam maximum may sit one cell away
+    // from the CFAR cell when a stronger neighbour dominated the summed power.
+    const double sin_az = std::sin(cand.azimuth_rad);
+    const double phase_step = 2.0 * kPi * radar_.rx_spacing_wavelengths * sin_az;
+    for (std::size_t k = 0; k < radar_.num_rx; ++k) {
+      steering_[k] = std::polar(1.0f, static_cast<float>(phase_step * static_cast<double>(k)));
     }
-    const double dd =
-        log_parabolic_offset(power_(r, (d + nd - 1) % nd), power_(r, d), power_(r, (d + 1) % nd));
+    auto beam = [&](std::size_t rr, std::size_t dc) {
+      cfloat acc{};
+      for (std::size_t k = 0; k < radar_.num_rx; ++k) acc += spectrum_(k, dc, rr) * steering_[k];
+      return static_cast<double>(squared_magnitude(acc));
+    };
+    auto wrap_d = [nd](std::size_t dc, int step) {
+      return static_cast<std::size_t>(static_cast<std::ptrdiff_t>(dc + nd) + step) % nd;
+    };
+    std::size_t dp = d;
+    double b0 = beam(r, dp), bl = beam(r, wrap_d(dp, -1)), bh = beam(r, wrap_d(dp, 1));
+    if (bl > b0 || bh > b0) {
+      dp = wrap_d(dp, bl > bh ? -1 : 1);
+      b0 = beam(r, dp);
+      bl = beam(r, wrap_d(dp, -1));
+      bh = beam(r, wrap_d(dp, 1));
+    }
+    const double dd = log_parabolic_offset(bl, b0, bh);
+    double dr = 0.0;
+    if (r > 0 && r + 1 < nr)
+      dr = log_parabolic_offset(beam(r - 1, dp), beam(r, dp), beam(r + 1, dp));
+    double doppler_bin = static_cast<double>(dp) + dd;
+    // Keep the velocity on the same side of the wrap as the CFAR cell.
+    if (doppler_bin - static_cast<double>(d) > static_cast<double>(nd) / 2.0)
+      doppler_bin -= static_cast<double>(nd);
+    if (static_cast<double>(d) - doppler_bin > static_cast<double>(nd) / 2.0)
+      doppler_bin += static_cast<double>(nd);
     const double range = rd_.bin_to_range(static_cast<double>(r) + dr);
     if (range < cfg_.min_range_m) continue;
     const double snr_db = 10.0 * std::log10(cand.power / noise);
@@ -131,7 +161,7 @@ void RadarPipeline::process(const DataCube& adc, FrameResult& result) {
 
     Detection det;
     det.range_m = static_cast<float>(range);
-    det.velocity_mps = static_cast<float>(rd_.bin_to_velocity(static_cast<double>(d) + dd));
+    det.velocity_mps = static_cast<float>(rd_.bin_to_velocity(doppler_bin));
     det.azimuth_rad = static_cast<float>(cand.azimuth_rad);
     det.x_m = static_cast<float>(range * std::cos(cand.azimuth_rad));
     det.y_m = static_cast<float>(range * std::sin(cand.azimuth_rad));

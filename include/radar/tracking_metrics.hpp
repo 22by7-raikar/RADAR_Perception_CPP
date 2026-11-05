@@ -43,7 +43,12 @@ class TrackingEvaluator {
  public:
   explicit TrackingEvaluator(const TrackingEvalConfig& cfg = {}) : cfg_(cfg) {}
 
-  void add_frame(const std::vector<GroundTruthObject>& truth, const std::vector<Track>& tracks);
+  /// `track_to_truth` maps the tracker's world frame into the ground-truth
+  /// world frame. With an estimated ego pose it is true_sensor ∘ est_sensor⁻¹,
+  /// so tracking is scored on geometry relative to the sensor, independent of
+  /// odometry drift.
+  void add_frame(const std::vector<GroundTruthObject>& truth, const std::vector<Track>& tracks,
+                 const Pose2D& track_to_truth = {});
   const TrackingMetrics& metrics() const { return m_; }
 
  private:

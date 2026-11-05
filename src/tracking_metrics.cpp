@@ -30,7 +30,7 @@ double TrackingMetrics::class_accuracy() const {
 }
 
 void TrackingEvaluator::add_frame(const std::vector<GroundTruthObject>& truth,
-                                  const std::vector<Track>& tracks) {
+                                  const std::vector<Track>& tracks, const Pose2D& track_to_truth) {
   std::vector<const GroundTruthObject*> gt;
   for (const auto& g : truth) {
     if (g.velocity_world.norm() >= cfg_.dynamic_speed_mps) gt.push_back(&g);
@@ -39,8 +39,13 @@ void TrackingEvaluator::add_frame(const std::vector<GroundTruthObject>& truth,
   // is a class error, not a miss); unmatched tracks are false positives only
   // when they claim to be dynamic.
   std::vector<const Track*> trk;
+  std::vector<Vec2> trk_pos, trk_vel;
+  const Mat2 rot = track_to_truth.rotation_matrix();
   for (const auto& t : tracks) {
-    if (t.confirmed()) trk.push_back(&t);
+    if (!t.confirmed()) continue;
+    trk.push_back(&t);
+    trk_pos.push_back(track_to_truth.to_parent(t.position()));
+    trk_vel.push_back(rot * t.velocity());
   }
 
   constexpr double kForbidden = 1e9;
@@ -48,7 +53,7 @@ void TrackingEvaluator::add_frame(const std::vector<GroundTruthObject>& truth,
       static_cast<Eigen::Index>(gt.size()), static_cast<Eigen::Index>(trk.size()), kForbidden);
   for (std::size_t i = 0; i < gt.size(); ++i) {
     for (std::size_t j = 0; j < trk.size(); ++j) {
-      const double d = (gt[i]->position_world - trk[j]->position()).norm();
+      const double d = (gt[i]->position_world - trk_pos[j]).norm();
       // Gate grows with object size: radar sees the near surface, not the centre.
       const double gate = cfg_.match_distance_m + 0.5 * std::max(gt[i]->length, gt[i]->width);
       if (d <= gate) {
@@ -64,10 +69,11 @@ void TrackingEvaluator::add_frame(const std::vector<GroundTruthObject>& truth,
       ++m_.misses;
       continue;
     }
-    const Track& t = *trk[static_cast<std::size_t>(match[i])];
+    const auto j = static_cast<std::size_t>(match[i]);
+    const Track& t = *trk[j];
     ++m_.matches;
-    m_.position_error_sum += (gt[i]->position_world - t.position()).norm();
-    m_.velocity_error_sum += (gt[i]->velocity_world - t.velocity()).norm();
+    m_.position_error_sum += (gt[i]->position_world - trk_pos[j]).norm();
+    m_.velocity_error_sum += (gt[i]->velocity_world - trk_vel[j]).norm();
     m_.confusion(static_cast<Eigen::Index>(gt[i]->cls), static_cast<Eigen::Index>(t.cls)) += 1;
     auto it = last_track_for_truth_.find(gt[i]->id);
     if (it != last_track_for_truth_.end() && it->second != t.id) ++m_.id_switches;
