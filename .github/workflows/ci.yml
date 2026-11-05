@@ -47,6 +47,7 @@ jobs:
           ./build/radar_demo --scenario scenarios/edge_cases.csv --frames 20 --out build/out_edge
           ./build/tracking_demo --duration 3 --out build/out_tracking
           ./build/odometry_demo --duration 3 --out build/out_odometry
+          ./build/fusion_demo --duration 3 --out build/out_fusion
       - name: Benchmarks (smoke)
         run: ./build/bench/radar_bench --benchmark_min_time=0.05s
 

@@ -241,19 +241,78 @@ How it works:
   (`b_g·v_x` and `b_a,y` cancel). Speed changes make them separable. A unit
   test covers both cases.
 
+## Radar-camera fusion
+
+`fusion_demo` adds a camera to the drive scenario: a pinhole camera, 1920×1080
+at 25 Hz, mounted 1.8 m behind and 0.8 m above the radar. Its clock is not
+synchronised with the radar's 20 Hz. The simulated 2D detector projects true
+3D boxes and adds 4 px of corner noise, 5 % misses, 0.3 false boxes per
+frame and 3 % class confusion.
+
+![Camera view](docs/images/fusion_camera_view.png)
+
+**Extrinsic calibration.** Corner reflectors at 16 positions and known tripod
+heights are measured through the full radar chain and seen by the camera.
+Levenberg–Marquardt on SE(3) (left perturbation, exact SE(3) exponential map)
+starts from a rough mounting guess and converges in 4 iterations:
+
+| | Rough guess | Calibrated |
+|---|---|---|
+| Rotation error | 3.5° | 0.08° |
+| Position error | 0.21 m | 0.03 m |
+| Reprojection RMS | 60 px | 1.6 px |
+
+**Fusion.** Each confirmed track is predicted to the camera timestamp, placed
+with the sensor pose at that time, given a 3D box (track extent plus a class
+prior), projected, and matched to camera boxes with the Hungarian algorithm
+on 1 − IoU. Class evidence from the camera accumulates per track with decay,
+and is then combined with the radar class probability.
+
+| Configuration | Correct association | IoU | Pedestrian class | Vehicle class |
+|---|---|---|---|---|
+| Calibrated + time sync | 80 % | 0.53 | 41 % | 97 % |
+| Rough extrinsic | 5 % | 0.29 | 2 % | 93 % |
+| Radar only | – | – | 0 % | 97 % |
+| 250 ms latency, time sync | 79 % | 0.51 | 30 % | 97 % |
+| 250 ms latency, no time sync | 68 % | 0.39 | 40 % | 92 % |
+
+The pedestrian column comes from one crossing pedestrian, a few hundred
+camera frames, so it varies by about ±10 points between configurations.
+Read it as a trend, not a ranking.
+
+What the numbers show:
+- **Calibration is a prerequisite.** A 3.5° error moves a box at 50 m by
+  about 3 m, so association collapses from 80 % to 5 %.
+- **Time sync matters once latency is comparable to object size divided by
+  speed.** At 25–100 ms the stale box still overlaps. At 250 ms,
+  compensation keeps association at 79 % against 68 % without it.
+- **The camera fixes the radar's weakest class.** Pedestrians walking across
+  the line of sight are often labelled static by radar. Fused class accuracy
+  for them goes from 0 % to 41 %. Per-track evidence stops a single
+  mislabelled camera frame from flipping a confirmed vehicle.
+- **Remaining gap:** the pedestrians are 50–110 m away, where their boxes are
+  15–35 px tall, so 4 px of corner noise often pushes IoU under the 0.15
+  gate. A real system would add a centre-distance cost term for small boxes.
+
+The data is synthetic. Public radar-camera datasets (nuScenes, View-of-Delft)
+can't be reached from the build environment. The interfaces (`CameraModel`,
+`CameraDetection`, timestamps, `SensorState`) are what a dataset loader would
+fill in.
+
 ## Layout
 
 ```
 include/radar/   Signal: config, simulator, range_doppler, cfar, angle, pipeline
                  Objects: geometry, scene, scenarios, clustering, assignment, tracker, tracking_metrics
                  Ego-motion: ego_velocity, imu, ego_estimator
+                 Camera: camera, calibration, fusion
                  Utilities: evaluation, io
 src/             Implementation
-apps/            radar_demo (point cloud), tracking_demo (objects), odometry_demo (ego-motion)
-tests/           GoogleTest suite (68 tests)
+apps/            radar_demo, tracking_demo, odometry_demo, fusion_demo
+tests/           GoogleTest suite (76 tests)
 bench/           Google Benchmark suite
 scenarios/       Target scenarios (CSV)
-tools/           plot_results.py, plot_tracking.py, plot_odometry.py: figures from demo output
+tools/           plot_{results,tracking,odometry,fusion}.py: figures from demo output
 ```
 
 ## Build and run
@@ -276,6 +335,8 @@ python3 tools/plot_results.py out docs/images   # needs numpy + matplotlib
 python3 tools/plot_tracking.py out_tracking docs/images/tracking_intersection.png
 ./build/odometry_demo --out out_odometry
 python3 tools/plot_odometry.py out_odometry docs/images/odometry.png
+./build/fusion_demo --out out_fusion
+python3 tools/plot_fusion.py out_fusion docs/images/fusion_camera_view.png
 ```
 
 CMake options:
@@ -310,7 +371,7 @@ processing does not allocate.
 - [x] **Signal processing core:** range-Doppler, CFAR, angle estimation, point cloud
 - [x] **Object level:** DBSCAN clustering in (x, y, v), multi-target tracking (EKF with track management), classification
 - [x] **Ego-motion:** ego-velocity from stationary-point Doppler (RANSAC), fused with an IMU in an error-state Kalman filter
-- [ ] **Camera fusion:** extrinsic calibration, time sync and projecting radar points into images, on public radar + camera data
+- [x] **Camera fusion:** extrinsic calibration, time sync, projection and association (synthetic data; dataset loader still to do)
 - [ ] **Deployment:** ROS 2 nodes, ARM64 cross-compilation, embedded latency profiling, data-driven regression tests
 - [ ] **Performance:** TDM-MIMO virtual array, multithreaded per-channel FFTs
 

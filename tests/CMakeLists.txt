@@ -4,6 +4,7 @@ add_executable(radar_tests
   test_cfar.cpp
   test_clustering.cpp
   test_config.cpp
+  test_fusion.cpp
   test_ego_motion.cpp
   test_io.cpp
   test_pipeline.cpp

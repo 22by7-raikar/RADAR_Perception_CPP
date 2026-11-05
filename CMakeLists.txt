@@ -36,12 +36,15 @@ endif()
 add_library(radar_core
   src/angle.cpp
   src/assignment.cpp
+  src/calibration.cpp
+  src/camera.cpp
   src/cfar.cpp
   src/clustering.cpp
   src/config.cpp
   src/ego_estimator.cpp
   src/ego_velocity.cpp
   src/evaluation.cpp
+  src/fusion.cpp
   src/imu.cpp
   src/io.cpp
   src/pipeline.cpp
@@ -64,6 +67,8 @@ if(RP_BUILD_APPS)
   target_link_libraries(tracking_demo PRIVATE radar::core)
   add_executable(odometry_demo apps/odometry_demo.cpp)
   target_link_libraries(odometry_demo PRIVATE radar::core)
+  add_executable(fusion_demo apps/fusion_demo.cpp)
+  target_link_libraries(fusion_demo PRIVATE radar::core)
 endif()
 
 if(RP_BUILD_TESTS)
