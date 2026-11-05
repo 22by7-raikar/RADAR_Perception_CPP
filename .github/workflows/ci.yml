@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libeigen3-dev
       - name: Configure
         run: >
           cmake -S . -B build -G Ninja
@@ -45,6 +45,7 @@ jobs:
         run: |
           ./build/radar_demo --frames 20 --out build/out
           ./build/radar_demo --scenario scenarios/edge_cases.csv --frames 20 --out build/out_edge
+          ./build/tracking_demo --duration 3 --out build/out_tracking
       - name: Benchmarks (smoke)
         run: ./build/bench/radar_bench --benchmark_min_time=0.05s
 
@@ -54,7 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libeigen3-dev
       - name: Configure
         run: >
           cmake -S . -B build -G Ninja

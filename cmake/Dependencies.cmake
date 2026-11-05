@@ -1,5 +1,22 @@
 include(FetchContent)
 
+# Eigen: header-only linear algebra. Prefer the system package (libeigen3-dev).
+find_package(Eigen3 3.3 QUIET NO_MODULE)
+if(NOT TARGET Eigen3::Eigen)
+  message(STATUS "Eigen3 not found on the system; fetching 3.4.0")
+  FetchContent_Declare(eigen
+    GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
+    GIT_TAG        3.4.0
+    GIT_SHALLOW    TRUE
+  )
+  FetchContent_GetProperties(eigen)
+  if(NOT eigen_POPULATED)
+    FetchContent_Populate(eigen)
+  endif()
+  add_library(Eigen3::Eigen INTERFACE IMPORTED GLOBAL)
+  target_include_directories(Eigen3::Eigen SYSTEM INTERFACE ${eigen_SOURCE_DIR})
+endif()
+
 # pocketfft: header-only FFT (BSD-3-Clause). Pinned to a commit on the C++ branch.
 FetchContent_Declare(pocketfft
   GIT_REPOSITORY https://github.com/mreineck/pocketfft.git

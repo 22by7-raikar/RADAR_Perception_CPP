@@ -35,22 +35,30 @@ endif()
 
 add_library(radar_core
   src/angle.cpp
+  src/assignment.cpp
   src/cfar.cpp
+  src/clustering.cpp
   src/config.cpp
   src/evaluation.cpp
   src/io.cpp
   src/pipeline.cpp
   src/range_doppler.cpp
+  src/scenarios.cpp
+  src/scene.cpp
   src/simulator.cpp
+  src/tracker.cpp
+  src/tracking_metrics.cpp
   src/window.cpp
 )
 add_library(radar::core ALIAS radar_core)
 target_include_directories(radar_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(radar_core PUBLIC rp_options PRIVATE pocketfft)
+target_link_libraries(radar_core PUBLIC rp_options Eigen3::Eigen PRIVATE pocketfft)
 
 if(RP_BUILD_APPS)
   add_executable(radar_demo apps/radar_demo.cpp)
   target_link_libraries(radar_demo PRIVATE radar::core)
+  add_executable(tracking_demo apps/tracking_demo.cpp)
+  target_link_libraries(tracking_demo PRIVATE radar::core)
 endif()
 
 if(RP_BUILD_TESTS)
