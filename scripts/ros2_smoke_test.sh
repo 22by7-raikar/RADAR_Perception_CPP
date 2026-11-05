@@ -7,9 +7,18 @@ source /opt/ros/"${ROS_DISTRO:-jazzy}"/setup.bash
 source install/setup.bash
 set -u
 
-ros2 launch radar_perception_ros demo.launch.py duration:=20.0 > launch.log 2>&1 &
+# Own process group so the whole launch tree can be stopped. (Background jobs
+# in a non-interactive shell ignore SIGINT, so SIGINT alone would not stop it.)
+setsid ros2 launch radar_perception_ros demo.launch.py duration:=20.0 > launch.log 2>&1 &
 LAUNCH_PID=$!
-cleanup() { kill -INT "$LAUNCH_PID" 2>/dev/null || true; wait "$LAUNCH_PID" 2>/dev/null || true; }
+cleanup() {
+  kill -TERM -- "-$LAUNCH_PID" 2>/dev/null || true
+  for _ in $(seq 1 10); do
+    kill -0 "$LAUNCH_PID" 2>/dev/null || return 0
+    sleep 1
+  done
+  kill -KILL -- "-$LAUNCH_PID" 2>/dev/null || true
+}
 trap cleanup EXIT
 
 status=0
@@ -22,9 +31,8 @@ for topic in /radar/detections /radar/ego_velocity /radar/tracks /ego/odometry /
   fi
 done
 
-if timeout 30 ros2 topic echo --once /radar/processing_time_ms --field data 2>/dev/null | head -1 | grep -q .; then
-  echo "processing time sample: $(timeout 30 ros2 topic echo --once /radar/processing_time_ms --field data | head -1) ms"
-fi
+sample=$(timeout 30 ros2 topic echo --once --field data /radar/processing_time_ms 2>/dev/null | head -n 1 || true)
+echo "processing time per radar frame: ${sample:-n/a} ms"
 
 if [ "$status" -ne 0 ]; then
   echo "---- launch log ----"
