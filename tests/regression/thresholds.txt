@@ -21,6 +21,26 @@ mimo.elevation_mae_deg                  max 0.40    # 0.111
 # Sanity check that the effect being compensated is real
 mimo.uncompensated_azimuth_mae_deg      min 5.0     # 24.3 / 11.6 (GCC / Clang)
 
+# Interference: another FMCW radar, INR 30 dB, 12 frames
+interference.floor_rise_db              min 6.0     # 10.3 (sanity: the impairment is real)
+interference.detection_rate_unmitigated max 0.80    # 0.72
+interference.detection_rate_mitigated   min 0.88    # 0.90 (= clean)
+interference.false_alarms_mitigated     max 3.0     # 0.92 (219 per frame unmitigated)
+interference.residual_floor_db          max 0.5     # 0.09
+interference.weak_target_rate_mitigated min 0.60    # 0.67 (= clean)
+
+# Clutter and masking, 10 frames. CA rows document the effect OS-CFAR fixes.
+clutter.ca_masked_rate                  max 0.20    # 0.00
+clutter.ca_clutter_edge_rate            max 0.20    # 0.00
+clutter.os_masked_rate                  min 0.80    # 1.00
+clutter.os_clutter_edge_rate            min 0.80    # 1.00
+clutter.os_false_alarms_per_frame       max 0.50    # 0.00
+
+# Multipath off a guardrail, 20 frames
+multipath.mirror_ghost_removal          min 0.50    # 0.67
+multipath.real_flagged_per_frame        max 0.05    # 0.00
+multipath.rail_offset_error_m           max 0.30    # 0.10
+
 # Tracking: intersection scenario, 6 s
 tracking.mota                           min 0.45    # 0.553
 tracking.recall                         min 0.72    # 0.810

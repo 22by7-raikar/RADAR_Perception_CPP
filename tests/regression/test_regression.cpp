@@ -26,6 +26,7 @@
 #include "radar/ego_velocity.hpp"
 #include "radar/evaluation.hpp"
 #include "radar/fusion.hpp"
+#include "radar/impairment_experiments.hpp"
 #include "radar/imu.hpp"
 #include "radar/io.hpp"
 #include "radar/pipeline.hpp"
@@ -222,6 +223,35 @@ TEST(Regression, Mimo) {
   check("mimo.azimuth_mae_deg", ea / n);
   check("mimo.elevation_mae_deg", ee / n);
   check("mimo.uncompensated_azimuth_mae_deg", ea_uncomp / static_cast<double>(tp_uncomp));
+}
+
+// Impairments and mitigations (fixed seeds; see impairments_demo for the
+// full-length runs and figures).
+TEST(Regression, Interference) {
+  const auto r = experiments::run_interference(12, 11);
+  check("interference.floor_rise_db", r.floor_rise_db);
+  check("interference.detection_rate_unmitigated", r.interfered.detection_rate);
+  check("interference.detection_rate_mitigated", r.mitigated.detection_rate);
+  check("interference.false_alarms_mitigated", r.mitigated.false_alarms_per_frame);
+  check("interference.residual_floor_db", r.residual_floor_db);
+  check("interference.weak_target_rate_mitigated", r.weak_target_rate_mitigated);
+}
+
+TEST(Regression, ClutterCfar) {
+  const auto r = experiments::run_clutter(10, 11);
+  check("clutter.ca_masked_rate", r.ca.masked_rate);
+  check("clutter.ca_clutter_edge_rate", r.ca.clutter_edge_rate);
+  check("clutter.os_masked_rate", r.os.masked_rate);
+  check("clutter.os_clutter_edge_rate", r.os.clutter_edge_rate);
+  check("clutter.os_false_alarms_per_frame", r.os.false_alarms_per_frame);
+}
+
+TEST(Regression, Multipath) {
+  const auto r = experiments::run_multipath(20, 11);
+  check("multipath.mirror_ghost_removal",
+        1.0 - r.mirror_ghosts_left_per_frame / r.mirror_ghosts_per_frame);
+  check("multipath.real_flagged_per_frame", r.real_flagged_per_frame);
+  check("multipath.rail_offset_error_m", r.rail_offset_error_m);
 }
 
 TEST(Regression, Tracking) {

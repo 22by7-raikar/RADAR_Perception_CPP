@@ -58,6 +58,7 @@ jobs:
           ./build/odometry_demo --duration 3 --out build/out_odometry
           ./build/fusion_demo --duration 3 --out build/out_fusion
           ./build/mimo_demo --out build/out_mimo
+          ./build/impairments_demo --frames 5 --out build/out_impairments
       - name: Benchmarks (smoke)
         run: ./build/bench/radar_bench --benchmark_min_time=0.05s
 

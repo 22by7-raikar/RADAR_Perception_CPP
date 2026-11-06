@@ -52,8 +52,11 @@ add_library(radar_core
   src/ego_velocity.cpp
   src/evaluation.cpp
   src/fusion.cpp
+  src/impairment_experiments.cpp
   src/imu.cpp
+  src/impairments.cpp
   src/io.cpp
+  src/mitigation.cpp
   src/pipeline.cpp
   src/range_doppler.cpp
   src/scenarios.cpp
@@ -103,6 +106,8 @@ if(RP_BUILD_APPS)
   target_link_libraries(fusion_demo PRIVATE radar::core rp_options)
   add_executable(mimo_demo apps/mimo_demo.cpp)
   target_link_libraries(mimo_demo PRIVATE radar::core rp_options)
+  add_executable(impairments_demo apps/impairments_demo.cpp)
+  target_link_libraries(impairments_demo PRIVATE radar::core rp_options)
 endif()
 
 if(RP_BUILD_TESTS)

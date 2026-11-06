@@ -29,12 +29,15 @@ RadarPipeline::RadarPipeline(const RadarConfig& radar, const PipelineConfig& cfg
       cfg_(cfg),
       rd_(radar, cfg.range_doppler),
       cfar_(with_looks(cfg.cfar, radar.num_virtual())),
+      os_cfar_(with_looks(cfg.cfar, radar.num_virtual()), cfg.os_cfar_rank),
       angle_(radar, cfg.angle),
       spectrum_(radar.num_virtual(), radar.chirps_per_frame, radar.samples_per_chirp),
       power_(radar.samples_per_chirp, radar.chirps_per_frame),
       steering_(radar.num_virtual()),
       snapshot_(radar.num_virtual()),
-      compensated_(radar.num_virtual()) {}
+      compensated_(radar.num_virtual()) {
+  if (cfg_.cfar_type == CfarType::kOrderedStatistic) os_cfar_.prepare(radar.samples_per_chirp);
+}
 
 cfloat RadarPipeline::tdm_compensation(std::size_t channel, std::size_t doppler_bin,
                                        int fold) const {
@@ -108,13 +111,24 @@ void RadarPipeline::process(const DataCube& adc, FrameResult& result) {
   result.detections.clear();
   const auto t0 = Clock::now();
 
-  rd_.process(adc, spectrum_);
+  result.interference_samples_blanked = 0;
+  if (cfg_.interference.enabled) {
+    adc_work_ = adc;
+    result.interference_samples_blanked =
+        mitigate_interference(radar_, cfg_.interference, adc_work_, scratch_);
+    rd_.process(adc_work_, spectrum_);
+  } else {
+    rd_.process(adc, spectrum_);
+  }
   const auto t1 = Clock::now();
 
   integrate_power(spectrum_, power_);
   const auto t2 = Clock::now();
 
-  cfar_.detect(power_, cells_);
+  if (cfg_.cfar_type == CfarType::kOrderedStatistic)
+    os_cfar_.detect(power_, cells_);
+  else
+    cfar_.detect(power_, cells_);
   result.cfar_cells = cells_.size();
   const auto t3 = Clock::now();
 

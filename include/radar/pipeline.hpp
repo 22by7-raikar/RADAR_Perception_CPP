@@ -6,14 +6,21 @@
 #include "radar/angle.hpp"
 #include "radar/cfar.hpp"
 #include "radar/config.hpp"
+#include "radar/mitigation.hpp"
 #include "radar/range_doppler.hpp"
 #include "radar/types.hpp"
 
 namespace radar {
 
+enum class CfarType { kCellAveraging, kOrderedStatistic };
+
 struct PipelineConfig {
+  /// Time-domain blanking of interference bursts before the range FFT.
+  InterferenceMitigationConfig interference;
   RangeDopplerConfig range_doppler;
   CfarConfig cfar;  ///< num_looks is overridden with the number of channels
+  CfarType cfar_type = CfarType::kCellAveraging;
+  double os_cfar_rank = 0.75;  ///< OS-CFAR only: order statistic as a fraction of N
   AngleConfig angle;
   bool peak_grouping = true;
   /// Candidates in neighbouring cells closer than this in azimuth are grouped.
@@ -64,8 +71,9 @@ struct StageTimings {
 
 struct FrameResult {
   std::vector<Detection> detections;
-  std::size_t cfar_cells = 0;  ///< cells above threshold before peak grouping
-  double noise_floor = 0.0;    ///< mean noise power per cell (global estimate)
+  std::size_t interference_samples_blanked = 0;  ///< (chirp, sample) slots zeroed
+  std::size_t cfar_cells = 0;                    ///< cells above threshold before peak grouping
+  double noise_floor = 0.0;                      ///< mean noise power per cell (global estimate)
   StageTimings timings;
 };
 
@@ -90,8 +98,10 @@ class RadarPipeline {
   PipelineConfig cfg_;
   RangeDopplerProcessor rd_;
   CaCfar2D cfar_;
+  OsCfar2D os_cfar_;
   AngleEstimator angle_;
 
+  DataCube adc_work_;  ///< copy of the frame for interference blanking
   DataCube spectrum_;
   Grid2D<float> power_;
   std::vector<CfarCell> cells_;

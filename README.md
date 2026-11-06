@@ -21,6 +21,10 @@ simulator, unit tests, benchmarks and CI.
 - **TDM-MIMO 4D radar:** 3 Tx × 4 Rx virtual array with elevation, motion
   compensation between transmitters, velocity unfolding past the TDM Doppler
   limit, and per-detection elevation uncertainty.
+- **Real-world impairments, simulated and mitigated:** interference from
+  another radar (time-domain burst detection, blanking and IMAT
+  reconstruction), clutter and target masking (OS-CFAR with an exact
+  threshold), and multipath ghosts off guardrails.
 - **CFAR set by false-alarm rate.** The threshold multiplier is solved
   exactly for square-law detection with *K* integrated looks. You set a
   target Pfa, not a hand-tuned dB offset. A test checks that the measured
@@ -220,6 +224,98 @@ range: σ ≈ 0.07° at 30 m, 0.5° at 80 m (0.7 m of height) and 1.8° at
 spread (it agrees within 8 %). The demo only calls a return "pass under" or
 "drive over" when its height clears the vehicle band by 2σ. That is why the
 stopped car at 100 m, whose heights scatter by ±0.5 m, is never dismissed.
+
+## Real-world impairments
+
+The point-target simulator is optimistic. `impairments.hpp` adds three
+effects that real radars face, and `mitigation.hpp` the counter-measures.
+Each is scored with and without its mitigation (`impairments_demo`,
+40 frames, and the regression suite).
+
+### Interference from another radar
+
+Another FMCW radar with a different chirp slope sweeps through this radar's
+IF band once in a while. Each crossing leaves a short (about 20-sample),
+broadband burst in the ADC data. After the FFT, its energy is spread over
+every range bin.
+
+| 40 frames, INR 30 dB | Detected | False alarms / frame | Weak targets (0 dBsm, > 100 m) |
+|---|---|---|---|
+| Clean | 90 % | 0.00 | 67 % |
+| Interfered | 72 % | 222 | 8 % |
+| Interfered + mitigation | 90 % | 0.85 | 67 % |
+
+The noise floor rises 10.3 dB, and the bursts also create hundreds of false
+alarms, because they sit in a few chirps and leave structure along Doppler.
+After mitigation the floor is within 0.1 dB of clean.
+
+Getting there took three steps, each fixing a failure of the previous one:
+
+1. **Detect on a residual, not on raw samples.** A car at 12 m returns an
+   echo stronger than the interference, so in the raw samples the burst is
+   only 3 dB above the chirp median. Echoes are tones and bursts are
+   broadband, so the detector notches strong spectral bins out
+   (Hann-windowed, so off-bin tones don't leak) and thresholds the residual,
+   where the burst is +27 dB.
+2. **Don't leave zeros.** Zeroing the burst cuts a gap into the strong echo
+   at a different place in every chirp. That smears the echo over all Doppler
+   bins and ±50 range bins, and produced 400 false alarms per frame, more
+   than doing nothing.
+3. **Refill the gap with IMAT** (iterative thresholded reconstruction):
+   repeatedly keep the spectral bins above a threshold that drops from the
+   peak to the noise floor, transform back and overwrite only the gap. Five
+   iterations remove the smear (0.85 false alarms per frame). Mitigation
+   costs about 2 ms per frame with interference present and 0.75 ms
+   without.
+
+![Interference](docs/images/impairments_interference.png)
+
+### Clutter and masking: OS-CFAR
+
+Cell-averaging CFAR estimates noise from the mean of its training cells. A
+strong target or a patch of clutter inside the window inflates that mean and
+hides weak targets next to it. `OsCfar2D` uses the k-th smallest training
+cell (k = 0.75 N) instead. Its threshold multiplier is solved exactly for the
+design Pfa by integrating over the order-statistic density of Gamma(K)
+noise. A unit test checks it against the closed form for K = 1, and a Monte
+Carlo test checks the empirical false-alarm rate.
+
+| 40 frames | Pedestrian at a vegetation edge | Motorbike 4 m behind a car | Same motorbike alone | CFAR time |
+|---|---|---|---|---|
+| CA-CFAR | 0 % | 0 % | 100 % | 0.2 ms |
+| OS-CFAR | 100 % | 95 % | 100 % | 1.4 ms |
+
+OS-CFAR also returns more detections inside the clutter itself (32 vs. 24
+per frame). Those are real reflectors, but they load the tracker. Only
+cells that could plausibly pass are sorted (a pre-screen against the map
+median), so OS-CFAR costs about 1 ms more than CA, not tens of ms. That
+pre-screen assumes a roughly flat noise floor.
+
+![CA vs OS CFAR](docs/images/impairments_cfar.png)
+
+### Multipath ghosts off a guardrail
+
+A guardrail is a mirror. A car in front of it produces a double-bounce echo
+at its mirror image behind the rail, and two single-bounce echoes halfway
+in range and Doppler. The mitigation fits the rail with RANSAC on static
+detections (static from the ego velocity). It then flags moving detections
+behind it that mirror a real detection. The mirror check is what keeps a
+real vehicle on a road behind the rail.
+
+| 40 frames | Value |
+|---|---|
+| Guardrail found / offset error | 100 % / 0.10 m |
+| Mirror ghosts per frame | 1.60 → 0.33 (79 % removed) |
+| Real moving detections wrongly removed | 0 (including a motorbike genuinely behind the rail) |
+| Single-bounce ghosts along the real bearing | 0.90 per frame, not addressed |
+
+The ghosts that survive show a harder problem. For a car at 80 m, the
+direct and reflected paths fall in the same range-Doppler cell. Their
+coherent sum biases the angle, putting the car at y = +3 m instead of
+−1 m, so its ghost no longer mirrors it. Fixing that needs super-resolution
+angle estimation or track-level reasoning, not detection-level filtering.
+
+![Multipath](docs/images/impairments_multipath.png)
 
 ## Object-level perception
 
@@ -452,7 +548,8 @@ private to the build.
 ### Regression suite
 
 `tests/regression/` runs fixed-seed versions of every experiment (point
-cloud, TDM-MIMO, tracking, odometry, calibration) and checks 28 metrics against
+cloud, TDM-MIMO, interference, clutter, multipath, tracking, odometry,
+calibration) and checks 42 metrics against
 `thresholds.txt`. Each bound sits above or below the current value with
 margin, so a change that degrades accuracy fails CI even when every unit
 test still passes. CI uploads the measured-vs-bound table
@@ -472,16 +569,17 @@ include/radar/   Signal: config, simulator, range_doppler, cfar, angle, pipeline
                  Objects: geometry, scene, scenarios, clustering, assignment, tracker, tracking_metrics
                  Ego-motion: ego_velocity, imu, ego_estimator
                  Camera: camera, calibration, fusion
+                 Impairments: impairments, mitigation, impairment_experiments
                  Utilities: evaluation, io
 src/             Implementation
-apps/            radar_demo, tracking_demo, odometry_demo, fusion_demo, mimo_demo
-tests/           GoogleTest unit suite (90 tests) + regression/ (scenario metrics vs. thresholds)
+apps/            radar_demo, tracking_demo, odometry_demo, fusion_demo, mimo_demo, impairments_demo
+tests/           GoogleTest unit suite (100 tests) + regression/ (scenario metrics vs. thresholds)
 ros2/            radar_perception_msgs, radar_perception_ros (nodes, launch, params)
 cmake/           dependencies, package config, toolchains/aarch64-linux-gnu.cmake
 scripts/         ros2_smoke_test.sh
 bench/           Google Benchmark suite
 scenarios/       Target scenarios (CSV)
-tools/           plot_{results,tracking,odometry,fusion,mimo}.py: figures from demo output
+tools/           plot_{results,tracking,odometry,fusion,mimo,impairments}.py: figures from demo output
 ```
 
 ## Build and run
@@ -508,6 +606,8 @@ python3 tools/plot_odometry.py out_odometry docs/images/odometry.png
 python3 tools/plot_fusion.py out_fusion docs/images/fusion_camera_view.png
 ./build/mimo_demo --out out_mimo
 python3 tools/plot_mimo.py out_mimo docs/images
+./build/impairments_demo --out out_impairments
+python3 tools/plot_impairments.py out_impairments docs/images
 ```
 
 CMake options:
@@ -546,7 +646,7 @@ processing does not allocate.
 - [x] **Deployment:** ROS 2 nodes, ARM64 cross-compilation, installable CMake package, data-driven regression tests
 - [ ] **Real data:** loader for a public radar + camera dataset, and latency profiling on a physical ARM board
 - [x] **4D radar:** TDM-MIMO virtual array with elevation, motion compensation, velocity unfolding
-- [ ] **Real-world impairments:** interference, multipath ghosts, clutter
+- [x] **Real-world impairments:** interference (blanking + IMAT), clutter (OS-CFAR), multipath ghosts
 - [ ] **Performance:** multithreaded per-channel FFTs, GPU (CUDA) range-Doppler and CFAR
 
 ## License
