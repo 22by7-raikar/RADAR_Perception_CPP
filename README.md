@@ -3,8 +3,8 @@
 [![CI](https://github.com/22by7-raikar/RADAR_Perception_CPP/actions/workflows/ci.yml/badge.svg)](https://github.com/22by7-raikar/RADAR_Perception_CPP/actions/workflows/ci.yml)
 
 A real-time FMCW radar perception stack in modern C++. It takes raw IQ ADC
-frames and produces a point cloud (range, radial velocity, azimuth), then
-tracked and classified objects. It comes with a physically grounded
+frames and produces a point cloud (range, radial velocity, azimuth and, with
+a TDM-MIMO array, elevation), then tracked and classified objects. It comes with a physically grounded
 simulator, unit tests, benchmarks and CI.
 
 ![Point cloud](docs/images/point_cloud.png)
@@ -18,6 +18,9 @@ simulator, unit tests, benchmarks and CI.
 - **About 3–4 ms per frame** for the signal chain on one CPU core, for 256
   samples × 128 chirps × 8 receive channels, plus about 0.3 ms for
   clustering and tracking. That is under 10% of a 20 Hz frame budget.
+- **TDM-MIMO 4D radar:** 3 Tx × 4 Rx virtual array with elevation, motion
+  compensation between transmitters, velocity unfolding past the TDM Doppler
+  limit, and per-detection elevation uncertainty.
 - **CFAR set by false-alarm rate.** The threshold multiplier is solved
   exactly for square-law detection with *K* integrated looks. You set a
   target Pfa, not a hand-tuned dB offset. A test checks that the measured
@@ -41,7 +44,7 @@ frames at 20 Hz:
 |---|---|
 | Detection rate | 100 % (350 / 350) |
 | False alarms | 0.00 per frame (design Pfa 1e-6, plus a 10 dB SNR floor per angle peak) |
-| Mean absolute range error | 0.11 m (bin size 1.0 m) |
+| Mean absolute range error | 0.010 m (bin size 1.0 m; 0.11 m before correcting range-Doppler coupling) |
 | Mean absolute velocity error | 0.02 m/s (bin size 1.09 m/s) |
 | Mean absolute azimuth error | 0.02° |
 | Latency, mean / p99 | ≈ 3.8 ms / ≈ 6.6 ms |
@@ -132,6 +135,91 @@ Pfa = Σ_{i=0}^{K−1} C(NK + i − 1, i) · tⁱ / (1 + t)^{NK + i}
 equals the requested false-alarm probability. For *K* = 1 this reduces to
 the textbook `t = Pfa^(−1/N) − 1`, and a unit test checks that case. *N*
 shrinks at range edges, so the multiplier is cached for each distinct *N*.
+
+## 4D radar: TDM-MIMO with elevation
+
+`RadarConfig::tdm_mimo_3tx4rx()` is the antenna layout common on single-chip
+77 GHz radars. Three transmitters take turns, one chirp each per loop. Every
+Tx/Rx pair acts as a virtual element at the sum of the two positions:
+
+```
+ z (λ)                       Tx0 + Rx: y = 0 … 1.5
+ 0.5          ○ ○ ○ ○        Tx1 + Rx: y = 1 … 2.5, raised by λ/2
+ 0      ● ● ● ● ● ● ● ●      Tx2 + Rx: y = 2 … 3.5
+        0     1     2     3  y (λ)
+```
+
+Tx0 and Tx2 make an 8-element azimuth row, as large as the 8-receiver
+array. The four raised elements of Tx1 measure elevation from the phase
+between them and the row elements underneath, after beamforming both at the
+azimuth peak. The cube carries 12 channels (`channel = tx · num_rx + rx`).
+The FFT, CFAR, peak grouping and downstream stages are unchanged.
+
+TDM makes two problems that a single-transmitter radar doesn't have:
+
+**Motion between transmitters.** Tx1 fires one chirp period after Tx0 and Tx2
+two, so a moving target's phase has advanced in between. Uncorrected, the Tx2
+half of the azimuth row is rotated against the Tx0 half. The pipeline undoes
+it per cell using that cell's Doppler phase.
+
+**A third of the velocity span.** Each transmitter only chirps every 3
+chirp periods, so the Doppler FFT aliases at ±23.2 m/s instead of ±69.5 m/s.
+At 100 km/h the static world closes faster than that. The Doppler FFT can't
+tell v from v ± 46.4 m/s, but the compensation phase differs between them,
+so the pipeline tries each hypothesis and keeps the one that fits a plane
+wave best. The score is the azimuth beam's focus multiplied by the
+**coherence of the elevation pairs**. Every raised element must show the same
+phase ratio to the element below it, however many reflectors share the cell.
+A wrong hypothesis rotates the pairs below Tx0 and those below Tx2 apart by
+120° or 240°. Beam focus alone was fooled by cells holding several
+unresolved reflectors that interfered (a sign gantry). Adding coherence
+halved those errors, and an elevation field-of-view gate (±30°) removes the
+rest.
+
+![TDM-MIMO velocity sweep](docs/images/mimo_velocity.png)
+
+Regression: 40 frames × 4 random targets with |v| < 65 m/s and |elevation|
+< 12° (`tests/regression`):
+
+| Metric | Value |
+|---|---|
+| Detection rate / false alarms | 100 % / 0.00 per frame |
+| Velocity unfolded correctly (targets beyond ±23.2 m/s) | 100 % |
+| Range / velocity error | 0.011 m / 0.03 m/s |
+| Azimuth / elevation error | 0.05° / 0.11° |
+| Azimuth error without motion compensation | 12–24° |
+| Latency (12 channels, 3 hypotheses per cell) | 2.6 ms per frame vs. 1.9 ms for 1 Tx × 8 Rx |
+
+**Range-Doppler coupling.** Building this exposed a bias the
+single-transmitter pipeline had all along. The Doppler shift adds to the beat
+frequency, so a target closing at 40 m/s appears 0.25 m nearer. The FFT
+also measures range averaged over the frame, not at its start. Both are
+now removed using the unfolded velocity (a folded one would get the
+correction wrong). Range error fell from 0.11 m to 0.01 m for both radars.
+
+### Why elevation matters: overhead structures
+
+At 100 km/h a sign gantry over the road, a stopped car under it and a metal
+plate on the road are all static, in-lane reflectors closing at the same
+speed. A radar without elevation can't tell them apart. It has to brake for
+all of them or ignore all stationary returns, which is the classic false-brake
+or missed-stopped-car trade-off of 3D automotive radar. `mimo_demo` drives at
+them for 10 frames:
+
+| | Gantry (5.8 m up) | Stopped car | Plate on the road |
+|---|---|---|---|
+| 3D radar, flagged as in-lane obstacle | 5 / 10 frames | 10 / 10 | 10 / 10 |
+| 4D radar, flagged as in-lane obstacle | 0 / 10 | 10 / 10 | 0 / 10 |
+
+![Overhead structure](docs/images/mimo_overhead.png)
+
+Elevation from two rows λ/2 apart is coarse, and height error grows with
+range: σ ≈ 0.07° at 30 m, 0.5° at 80 m (0.7 m of height) and 1.8° at
+150 m. Each detection carries `elevation_std_rad`, predicted from its SNR
+(σ_φ² ≈ 1 / (N_pairs · SNR)). A unit test checks it against the measured
+spread (it agrees within 8 %). The demo only calls a return "pass under" or
+"drive over" when its height clears the vehicle band by 2σ. That is why the
+stopped car at 100 m, whose heights scatter by ±0.5 m, is never dismissed.
 
 ## Object-level perception
 
@@ -310,7 +398,7 @@ The nodes are thin wrappers around the library:
 
 | Node | Subscribes | Publishes |
 |---|---|---|
-| `sim_source_node` | – | `radar/cube` (20 Hz), `imu` (100 Hz), `/clock`, ground truth |
+| `sim_source_node` | – | `radar/cube` (20 Hz, 8 or 12 channels), `imu` (100 Hz), `/clock`, ground truth |
 | `radar_perception_node` | `radar/cube`, `ego/odometry` | `radar/detections` (PointCloud2: x, y, z, velocity, snr, rcs), `radar/ego_velocity`, `radar/tracks`, `radar/track_markers`, `radar/processing_time_ms` |
 | `ego_estimator_node` | `imu`, `radar/ego_velocity` | `ego/odometry`, TF `odom → base_link`, static TF `base_link → radar` |
 
@@ -327,11 +415,13 @@ source /opt/ros/jazzy/setup.bash
 colcon build --base-paths ros2 --cmake-args -DCMAKE_PREFIX_PATH=$HOME/radar_perception
 # 3. run
 source install/setup.bash
-ros2 launch radar_perception_ros demo.launch.py
+ros2 launch radar_perception_ros demo.launch.py                          # 1 Tx x 8 Rx
+ros2 launch radar_perception_ros demo.launch.py array:=tdm_mimo_3tx4rx  # 4D, z in the point cloud
 ```
 
-In CI, a `ros:jazzy` container builds both packages, launches the graph, and
-checks that every output topic publishes (`scripts/ros2_smoke_test.sh`).
+In CI, `ros:jazzy` (4D array) and `ros:humble` (8-receiver array) containers
+build both packages, launch the graph, and check that every output topic
+publishes (`scripts/ros2_smoke_test.sh`).
 
 ### ARM64 and embedded targets
 
@@ -362,7 +452,7 @@ private to the build.
 ### Regression suite
 
 `tests/regression/` runs fixed-seed versions of every experiment (point
-cloud, tracking, odometry, calibration) and checks 20 metrics against
+cloud, TDM-MIMO, tracking, odometry, calibration) and checks 28 metrics against
 `thresholds.txt`. Each bound sits above or below the current value with
 margin, so a change that degrades accuracy fails CI even when every unit
 test still passes. CI uploads the measured-vs-bound table
@@ -384,14 +474,14 @@ include/radar/   Signal: config, simulator, range_doppler, cfar, angle, pipeline
                  Camera: camera, calibration, fusion
                  Utilities: evaluation, io
 src/             Implementation
-apps/            radar_demo, tracking_demo, odometry_demo, fusion_demo
-tests/           GoogleTest unit suite (76 tests) + regression/ (scenario metrics vs. thresholds)
+apps/            radar_demo, tracking_demo, odometry_demo, fusion_demo, mimo_demo
+tests/           GoogleTest unit suite (90 tests) + regression/ (scenario metrics vs. thresholds)
 ros2/            radar_perception_msgs, radar_perception_ros (nodes, launch, params)
 cmake/           dependencies, package config, toolchains/aarch64-linux-gnu.cmake
 scripts/         ros2_smoke_test.sh
 bench/           Google Benchmark suite
 scenarios/       Target scenarios (CSV)
-tools/           plot_{results,tracking,odometry,fusion}.py: figures from demo output
+tools/           plot_{results,tracking,odometry,fusion,mimo}.py: figures from demo output
 ```
 
 ## Build and run
@@ -416,6 +506,8 @@ python3 tools/plot_tracking.py out_tracking docs/images/tracking_intersection.pn
 python3 tools/plot_odometry.py out_odometry docs/images/odometry.png
 ./build/fusion_demo --out out_fusion
 python3 tools/plot_fusion.py out_fusion docs/images/fusion_camera_view.png
+./build/mimo_demo --out out_mimo
+python3 tools/plot_mimo.py out_mimo docs/images
 ```
 
 CMake options:
@@ -432,13 +524,13 @@ CMake options:
 ```cpp
 #include "radar/pipeline.hpp"
 
-radar::RadarConfig cfg;              // or set your own front-end parameters
+radar::RadarConfig cfg;              // or RadarConfig::tdm_mimo_3tx4rx(), or your own
 radar::RadarPipeline pipeline(cfg);
 radar::FrameResult result;
 
-pipeline.process(adc_frame, result); // adc_frame: radar::DataCube [rx][chirp][sample]
+pipeline.process(adc_frame, result); // adc_frame: radar::DataCube [channel][chirp][sample]
 for (const auto& d : result.detections) {
-  // d.range_m, d.velocity_mps, d.azimuth_rad, d.x_m, d.y_m, d.snr_db
+  // d.range_m, d.velocity_mps, d.azimuth_rad, d.elevation_rad, d.x_m, d.y_m, d.z_m, d.snr_db
 }
 ```
 
@@ -453,7 +545,9 @@ processing does not allocate.
 - [x] **Camera fusion:** extrinsic calibration, time sync, projection and association (synthetic data; dataset loader still to do)
 - [x] **Deployment:** ROS 2 nodes, ARM64 cross-compilation, installable CMake package, data-driven regression tests
 - [ ] **Real data:** loader for a public radar + camera dataset, and latency profiling on a physical ARM board
-- [ ] **Performance:** TDM-MIMO virtual array, multithreaded per-channel FFTs
+- [x] **4D radar:** TDM-MIMO virtual array with elevation, motion compensation, velocity unfolding
+- [ ] **Real-world impairments:** interference, multipath ghosts, clutter
+- [ ] **Performance:** multithreaded per-channel FFTs, GPU (CUDA) range-Doppler and CFAR
 
 ## License
 

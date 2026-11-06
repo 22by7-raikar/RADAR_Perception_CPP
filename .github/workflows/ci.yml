@@ -57,6 +57,7 @@ jobs:
           ./build/tracking_demo --duration 3 --out build/out_tracking
           ./build/odometry_demo --duration 3 --out build/out_odometry
           ./build/fusion_demo --duration 3 --out build/out_fusion
+          ./build/mimo_demo --out build/out_mimo
       - name: Benchmarks (smoke)
         run: ./build/bench/radar_bench --benchmark_min_time=0.05s
 
@@ -103,16 +104,25 @@ jobs:
         run: ctest --test-dir build-arm64 -L unit --output-on-failure
 
   ros2:
-    name: ROS 2 Jazzy (build + launch smoke test)
+    name: ROS 2 ${{ matrix.distro }} (build + launch smoke test, ${{ matrix.array }})
     runs-on: ubuntu-24.04
-    container: ros:jazzy
+    container: ros:${{ matrix.distro }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: jazzy
+            array: tdm_mimo_3tx4rx
+          - distro: humble
+            array: ula_8rx
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: >
           apt-get update && apt-get install -y ninja-build libeigen3-dev
-          ros-jazzy-visualization-msgs ros-jazzy-tf2-ros ros-jazzy-ros2launch
+          ros-${{ matrix.distro }}-visualization-msgs ros-${{ matrix.distro }}-tf2-ros
+          ros-${{ matrix.distro }}-ros2launch
       - name: Build and install the core library
         run: |
           cmake -S . -B build -G Ninja -DRP_BUILD_TESTS=OFF -DRP_BUILD_BENCHMARKS=OFF -DRP_BUILD_APPS=OFF
@@ -121,10 +131,12 @@ jobs:
       - name: colcon build
         shell: bash
         run: |
-          source /opt/ros/jazzy/setup.bash
+          source /opt/ros/${{ matrix.distro }}/setup.bash
           colcon build --base-paths ros2 --event-handlers console_direct+ \
             --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/radar_perception
       - name: Launch smoke test
         shell: bash
         timeout-minutes: 8
-        run: ./scripts/ros2_smoke_test.sh
+        env:
+          ROS_DISTRO: ${{ matrix.distro }}
+        run: ./scripts/ros2_smoke_test.sh array:=${{ matrix.array }}

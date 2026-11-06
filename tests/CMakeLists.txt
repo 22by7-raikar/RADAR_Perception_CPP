@@ -7,6 +7,7 @@ add_executable(radar_tests
   test_fusion.cpp
   test_ego_motion.cpp
   test_io.cpp
+  test_mimo.cpp
   test_pipeline.cpp
   test_range_doppler.cpp
   test_scene.cpp

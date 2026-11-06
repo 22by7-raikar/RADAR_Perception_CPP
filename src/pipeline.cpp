@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 
 #include "radar/interpolation.hpp"
 
@@ -27,11 +28,81 @@ RadarPipeline::RadarPipeline(const RadarConfig& radar, const PipelineConfig& cfg
     : radar_(radar),
       cfg_(cfg),
       rd_(radar, cfg.range_doppler),
-      cfar_(with_looks(cfg.cfar, radar.num_rx)),
+      cfar_(with_looks(cfg.cfar, radar.num_virtual())),
       angle_(radar, cfg.angle),
-      spectrum_(radar.num_rx, radar.chirps_per_frame, radar.samples_per_chirp),
+      spectrum_(radar.num_virtual(), radar.chirps_per_frame, radar.samples_per_chirp),
       power_(radar.samples_per_chirp, radar.chirps_per_frame),
-      steering_(radar.num_rx) {}
+      steering_(radar.num_virtual()),
+      snapshot_(radar.num_virtual()),
+      compensated_(radar.num_virtual()) {}
+
+cfloat RadarPipeline::tdm_compensation(std::size_t channel, std::size_t doppler_bin,
+                                       int fold) const {
+  const std::size_t tx = channel / radar_.num_rx;
+  if (tx == 0 || !cfg_.tdm_motion_compensation) return {1.0f, 0.0f};
+  // Doppler bin s (signed) is a phase advance of 2 pi s / Nd per loop, i.e.
+  // 2 pi (s + k Nd) / (Nd Ntx) per chirp under hypothesis k. Tx t fires t
+  // chirps into the loop and has picked up t times that.
+  const auto nd = static_cast<double>(radar_.chirps_per_frame);
+  const double s = static_cast<double>(doppler_bin) - nd / 2.0;
+  const double cycles = static_cast<double>(tx) * (s + static_cast<double>(fold) * nd) /
+                        (nd * static_cast<double>(radar_.num_tx));
+  return std::polar(1.0f, static_cast<float>(-2.0 * kPi * (cycles - std::floor(cycles))));
+}
+
+double RadarPipeline::fold_score(double peak_power) const {
+  // Beam focus: azimuth peak relative to its maximum for a single plane wave
+  // (row energy x row length), in [0, 1].
+  const VirtualArray& va = angle_.array();
+  double row_energy = 0.0;
+  for (std::size_t ch : va.azimuth_row) row_energy += squared_magnitude(compensated_[ch]);
+  const double focus =
+      peak_power / std::max(1e-30, row_energy * static_cast<double>(va.azimuth_row.size()));
+  if (!va.has_elevation()) return focus;
+  // Elevation coherence: raised/row phase ratio is common to all pairs under
+  // the right hypothesis (for reflectors sharing an elevation), whatever their
+  // azimuths; a wrong hypothesis rotates pairs from different Tx apart.
+  std::complex<double> sum{};
+  double mag = 0.0;
+  for (const auto& p : va.elevation_pairs) {
+    const std::complex<double> z = std::conj(std::complex<double>(compensated_[p.row])) *
+                                   std::complex<double>(compensated_[p.raised]);
+    sum += z;
+    mag += std::abs(z);
+  }
+  const double coherence = mag > 0.0 ? std::abs(sum) / mag : 0.0;
+  return focus * coherence;
+}
+
+int RadarPipeline::estimate_cell_angles(std::size_t r, std::size_t d) {
+  const std::size_t nch = radar_.num_virtual();
+  for (std::size_t ch = 0; ch < nch; ++ch) snapshot_[ch] = spectrum_(ch, d, r);
+  if (radar_.num_tx == 1 || !cfg_.tdm_motion_compensation) {
+    angle_.estimate_peaks(snapshot_.data(), angles_);
+    return 0;
+  }
+  // Hypotheses k = 0 .. Ntx-1 (mod Ntx), each taken at its smallest |velocity|.
+  const auto nd = static_cast<double>(radar_.chirps_per_frame);
+  const auto ntx = static_cast<int>(radar_.num_tx);
+  const double s = static_cast<double>(d) - nd / 2.0;
+  const int num_hyp = cfg_.velocity_unfolding ? ntx : 1;
+  int best_fold = 0;
+  double best_power = -1.0;
+  for (int q = 0; q < num_hyp; ++q) {
+    const int k = std::abs(s + q * nd) <= std::abs(s + (q - ntx) * nd) ? q : q - ntx;
+    for (std::size_t ch = 0; ch < nch; ++ch) {
+      compensated_[ch] = snapshot_[ch] * tdm_compensation(ch, d, k);
+    }
+    angle_.estimate_peaks(compensated_.data(), trial_angles_);
+    const double score = fold_score(trial_angles_.front().peak_power);
+    if (score > best_power) {
+      best_power = score;
+      best_fold = k;
+      angles_.swap(trial_angles_);
+    }
+  }
+  return best_fold;
+}
 
 void RadarPipeline::process(const DataCube& adc, FrameResult& result) {
   result.detections.clear();
@@ -52,13 +123,14 @@ void RadarPipeline::process(const DataCube& adc, FrameResult& result) {
   cell_first_.clear();
   for (const CfarCell& c : cells_) {
     cell_first_.push_back(candidates_.size());
-    angle_.estimate_peaks(spectrum_, c.range_bin, c.doppler_bin, angles_);
+    const int fold = estimate_cell_angles(c.range_bin, c.doppler_bin);
     double peak_sum = 0.0;
     for (const AngleEstimate& a : angles_) peak_sum += a.peak_power;
     for (const AngleEstimate& a : angles_) {
       // Cell power is shared between angle peaks in proportion to their strength.
       candidates_.push_back({static_cast<std::size_t>(&c - cells_.data()), a.azimuth_rad,
-                             static_cast<double>(c.power) * a.peak_power / peak_sum});
+                             a.elevation_rad,
+                             static_cast<double>(c.power) * a.peak_power / peak_sum, fold});
     }
   }
   cell_first_.push_back(candidates_.size());
@@ -111,7 +183,7 @@ void RadarPipeline::process(const DataCube& adc, FrameResult& result) {
   // SNR against the global floor, not the local CFAR estimate: near the
   // zero-Doppler clutter ridge the local estimate is inflated by neighbouring
   // static reflectors, which would bias RCS low.
-  result.noise_floor = estimate_noise_floor(power_, radar_.num_rx, scratch_);
+  result.noise_floor = estimate_noise_floor(power_, radar_.num_virtual(), scratch_);
   const double noise = std::max(1e-30, result.noise_floor);
   for (std::size_t ci = 0; ci < candidates_.size(); ++ci) {
     if (!keep_[ci]) continue;
@@ -123,14 +195,17 @@ void RadarPipeline::process(const DataCube& adc, FrameResult& result) {
     // not on the channel-summed power: two reflectors sharing a cell then each
     // get their own sub-bin position. The beam maximum may sit one cell away
     // from the CFAR cell when a stronger neighbour dominated the summed power.
-    const double sin_az = std::sin(cand.azimuth_rad);
-    const double phase_step = 2.0 * kPi * radar_.rx_spacing_wavelengths * sin_az;
-    for (std::size_t k = 0; k < radar_.num_rx; ++k) {
-      steering_[k] = std::polar(1.0f, static_cast<float>(phase_step * static_cast<double>(k)));
+    const std::size_t nch = radar_.num_virtual();
+    const double u = std::cos(cand.elevation_rad) * std::sin(cand.azimuth_rad);
+    const double w = std::sin(cand.elevation_rad);
+    for (std::size_t k = 0; k < nch; ++k) {
+      const ArrayElement p = radar_.virtual_position(k);
+      steering_[k] = std::polar(1.0f, static_cast<float>(2.0 * kPi * (p.y * u + p.z * w))) *
+                     tdm_compensation(k, d, cand.fold);
     }
     auto beam = [&](std::size_t rr, std::size_t dc) {
       cfloat acc{};
-      for (std::size_t k = 0; k < radar_.num_rx; ++k) acc += spectrum_(k, dc, rr) * steering_[k];
+      for (std::size_t k = 0; k < nch; ++k) acc += spectrum_(k, dc, rr) * steering_[k];
       return static_cast<double>(squared_magnitude(acc));
     };
     auto wrap_d = [nd](std::size_t dc, int step) {
@@ -154,22 +229,44 @@ void RadarPipeline::process(const DataCube& adc, FrameResult& result) {
       doppler_bin -= static_cast<double>(nd);
     if (static_cast<double>(d) - doppler_bin > static_cast<double>(nd) / 2.0)
       doppler_bin += static_cast<double>(nd);
-    const double range = rd_.bin_to_range(static_cast<double>(r) + dr);
+    const double velocity = rd_.bin_to_velocity(doppler_bin) +
+                            static_cast<double>(cand.fold) * 2.0 * radar_.max_velocity();
+    double range = rd_.bin_to_range(static_cast<double>(r) + dr);
+    if (cfg_.range_doppler_correction) {
+      range -= velocity * (radar_.carrier_hz / radar_.slope() + 0.5 * radar_.frame_duration());
+    }
     if (range < cfg_.min_range_m) continue;
+    if (std::abs(cand.elevation_rad) > cfg_.max_abs_elevation_rad) continue;
     const double snr_db = 10.0 * std::log10(cand.power / noise);
     if (snr_db < cfg_.min_snr_db) continue;
 
     Detection det;
     det.range_m = static_cast<float>(range);
-    det.velocity_mps = static_cast<float>(rd_.bin_to_velocity(doppler_bin));
+    det.velocity_mps = static_cast<float>(velocity);
     det.azimuth_rad = static_cast<float>(cand.azimuth_rad);
-    det.x_m = static_cast<float>(range * std::cos(cand.azimuth_rad));
-    det.y_m = static_cast<float>(range * std::sin(cand.azimuth_rad));
+    det.elevation_rad = static_cast<float>(cand.elevation_rad);
+    const double ground_range = range * std::cos(cand.elevation_rad);
+    det.x_m = static_cast<float>(ground_range * std::cos(cand.azimuth_rad));
+    det.y_m = static_cast<float>(ground_range * std::sin(cand.azimuth_rad));
+    det.z_m = static_cast<float>(range * std::sin(cand.elevation_rad));
     det.snr_db = static_cast<float>(snr_db);
     det.rcs_dbsm = static_cast<float>(static_cast<double>(det.snr_db) + 40.0 * std::log10(range) -
                                       cfg_.rcs_offset_db);
     det.range_bin = r;
     det.doppler_bin = d;
+    det.doppler_fold = cand.fold;
+    const VirtualArray& va = angle_.array();
+    if (va.has_elevation()) {
+      // Phase between two beams of N pairs, each at SNR N * snr: variance
+      // ~ 1 / (N snr). w = sin(el) = -phase / (2 pi dz).
+      const double snr = std::pow(10.0, snr_db / 10.0);
+      const double phase_std =
+          1.0 / std::sqrt(static_cast<double>(va.elevation_pairs.size()) * snr);
+      det.elevation_std_rad = static_cast<float>(
+          phase_std / (2.0 * kPi * va.elevation_spacing * std::cos(cand.elevation_rad)));
+    } else {
+      det.elevation_std_rad = std::numeric_limits<float>::infinity();
+    }
     result.detections.push_back(det);
   }
   const auto t5 = Clock::now();

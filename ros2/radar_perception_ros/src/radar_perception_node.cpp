@@ -35,7 +35,9 @@ class RadarPerceptionNode : public rclcpp::Node {
     radar::PipelineConfig pc;
     pc.rcs_offset_db = declare_parameter<double>("rcs_offset_db", 101.6);
     pc.cfar.pfa = declare_parameter<double>("cfar_pfa", 1e-6);
-    pipeline_ = std::make_unique<radar::RadarPipeline>(radar::RadarConfig{}, pc);
+    // Must match the source: "ula_8rx" (1 Tx x 8 Rx) or "tdm_mimo_3tx4rx".
+    const auto array = declare_parameter<std::string>("array", "ula_8rx");
+    pipeline_ = std::make_unique<radar::RadarPipeline>(radar_config(array), pc);
     mount_ = {declare_parameter<double>("mount_x", 3.6), declare_parameter<double>("mount_y", 0.0),
               declare_parameter<double>("mount_yaw", 0.0)};
     odom_frame_ = declare_parameter<std::string>("odom_frame", "odom");
@@ -125,7 +127,7 @@ class RadarPerceptionNode : public rclcpp::Node {
     for (const auto& d : dets) {
       *x = d.x_m;
       *y = d.y_m;
-      *z = 0.0f;
+      *z = d.z_m;
       *v = d.velocity_mps;
       *snr = d.snr_db;
       *rcs = d.rcs_dbsm;

@@ -5,10 +5,21 @@
 # Point cloud: multi_target.csv, 20 frames
 point_cloud.detection_rate              min 0.99    # 1.00
 point_cloud.false_alarms_per_frame      max 0.20    # 0.00
-point_cloud.range_mae_m                 max 0.20    # 0.105
+point_cloud.range_mae_m                 max 0.03    # 0.009 (0.105 before range-Doppler correction)
 point_cloud.velocity_mae_mps            max 0.05    # 0.017
 point_cloud.azimuth_mae_deg             max 0.10    # 0.028
 point_cloud.latency_mean_ms             max 15.0    # 3.5 on a 2.8 GHz x86-64 core
+
+# TDM-MIMO 3x4: 40 frames x 4 random targets, |v| < 65 m/s, |el| < 12 deg
+mimo.detection_rate                     min 0.97    # 1.00
+mimo.false_alarms_per_frame             max 0.30    # 0.00
+mimo.unfold_success_rate                min 0.97    # 1.00
+mimo.range_mae_m                        max 0.04    # 0.011
+mimo.velocity_mae_mps                   max 0.08    # 0.032
+mimo.azimuth_mae_deg                    max 0.20    # 0.051
+mimo.elevation_mae_deg                  max 0.40    # 0.111
+# Sanity check that the effect being compensated is real
+mimo.uncompensated_azimuth_mae_deg      min 5.0     # 24.3 / 11.6 (GCC / Clang)
 
 # Tracking: intersection scenario, 6 s
 tracking.mota                           min 0.45    # 0.553

@@ -26,6 +26,26 @@ struct PipelineConfig {
   /// RCS = SNR + 40 log10(R) - rcs_offset_db. Calibrate with a reflector of
   /// known RCS (see calibrate_rcs_offset).
   double rcs_offset_db = 0.0;
+  /// TDM-MIMO only. Transmitters fire one after another, so a moving target's
+  /// phase advances between them and corrupts the virtual array; undo it
+  /// with the cell's Doppler before angle estimation.
+  bool tdm_motion_compensation = true;
+  /// TDM-MIMO only. The compensation phase differs between velocity
+  /// hypotheses v + k * 2 v_max that the Doppler FFT cannot tell apart; pick
+  /// the one that focuses the azimuth beam best. Recovers the
+  /// single-transmitter velocity span (num_tx times wider).
+  bool velocity_unfolding = true;
+  /// Arrays with elevation only: drop peaks outside the antenna's elevation
+  /// field of view. Real patch arrays barely radiate there, so such estimates
+  /// come from corrupted cells (several unresolved reflectors that defeat the
+  /// unfolding test), not from real reflectors.
+  double max_abs_elevation_rad = 30.0 * 3.14159265358979323846 / 180.0;
+  /// Two velocity-dependent range biases, removed with the (unfolded)
+  /// velocity: the Doppler shift adds to the beat frequency, so a target
+  /// appears v * fc / S further away (0.25 m at 40 m/s with the default
+  /// chirp); and the FFT measures the range averaged over the frame, which is
+  /// referred back to the frame start (the cube's timestamp).
+  bool range_doppler_correction = true;
 };
 
 /// Offset that maps (SNR, range) of a reflector with known RCS onto that RCS.
@@ -80,15 +100,27 @@ class RadarPipeline {
   struct Candidate {
     std::size_t cell;  ///< index into cells_
     double azimuth_rad;
+    double elevation_rad;
     double power;
+    int fold;  ///< velocity hypothesis k of the cell
   };
   std::vector<Candidate> candidates_;
   std::vector<std::size_t> cell_first_;  ///< candidates of cell i: [first[i], first[i+1])
   std::vector<char> keep_;
   Grid2D<int> cell_lookup_;
-  std::vector<cfloat> steering_;  ///< conjugate steering vector of the current peak  ///< (range,
-                                  ///< doppler) -> CFAR cell index, -1 if none
+  std::vector<cfloat> steering_;  ///< conjugate steering vector of the current peak
+  std::vector<cfloat> snapshot_;  ///< channels of the current cell
+  std::vector<cfloat> compensated_;
+  std::vector<AngleEstimate> trial_angles_;
   std::vector<float> scratch_;
+
+  /// Angle peaks of one cell into angles_; returns the chosen velocity fold.
+  int estimate_cell_angles(std::size_t range_bin, std::size_t doppler_bin);
+  /// How well hypothesis-compensated channels (in compensated_) fit one
+  /// direction; higher is better.
+  double fold_score(double peak_power) const;
+  /// Per-channel phase that undoes TDM motion for Doppler bin `d`, fold `k`.
+  cfloat tdm_compensation(std::size_t channel, std::size_t doppler_bin, int fold) const;
 };
 
 /// Mean noise power per cell from the median of the power map. The median is

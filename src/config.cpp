@@ -22,6 +22,18 @@ void RadarConfig::validate() const {
   require(num_rx >= 1, "num_rx must be >= 1");
   require(rx_spacing_wavelengths > 0.0, "rx_spacing_wavelengths must be positive");
   require(noise_power >= 0.0, "noise_power must be non-negative");
+  require(num_tx >= 1, "num_tx must be >= 1");
+  require(tx_positions.empty() ? num_tx == 1 : tx_positions.size() == num_tx,
+          "tx_positions must list one position per transmitter (or be empty for one Tx)");
+}
+
+RadarConfig RadarConfig::tdm_mimo_3tx4rx() {
+  RadarConfig c;
+  c.num_tx = 3;
+  c.num_rx = 4;
+  c.rx_spacing_wavelengths = 0.5;
+  c.tx_positions = {{0.0, 0.0}, {1.0, 0.5}, {2.0, 0.0}};
+  return c;
 }
 
 }  // namespace radar

@@ -24,7 +24,7 @@ RangeDopplerProcessor::RangeDopplerProcessor(const RadarConfig& radar,
 }
 
 void RangeDopplerProcessor::process(const DataCube& adc, DataCube& spectrum) const {
-  const std::size_t nrx = radar_.num_rx;
+  const std::size_t nrx = radar_.num_virtual();
   const std::size_t nd = radar_.chirps_per_frame;
   const std::size_t nr = radar_.samples_per_chirp;
   if (adc.num_rx() != nrx || adc.num_chirps() != nd || adc.num_samples() != nr) {

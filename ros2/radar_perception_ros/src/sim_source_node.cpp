@@ -33,7 +33,8 @@ class SimSourceNode : public rclcpp::Node {
                                                 : radar::scenarios::ego_drive({}, duration_s_));
     radar::SimulatorConfig sc;
     sc.seed = seed;
-    sim_ = std::make_unique<radar::Simulator>(radar::RadarConfig{}, sc);
+    const auto array = declare_parameter<std::string>("array", "ula_8rx");
+    sim_ = std::make_unique<radar::Simulator>(radar_config(array), sc);
     radar::ImuConfig ic;
     ic.seed = seed + 10;
     imu_ = std::make_unique<radar::ImuSimulator>(ic);

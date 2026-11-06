@@ -101,6 +101,8 @@ if(RP_BUILD_APPS)
   target_link_libraries(odometry_demo PRIVATE radar::core rp_options)
   add_executable(fusion_demo apps/fusion_demo.cpp)
   target_link_libraries(fusion_demo PRIVATE radar::core rp_options)
+  add_executable(mimo_demo apps/mimo_demo.cpp)
+  target_link_libraries(mimo_demo PRIVATE radar::core rp_options)
 endif()
 
 if(RP_BUILD_TESTS)

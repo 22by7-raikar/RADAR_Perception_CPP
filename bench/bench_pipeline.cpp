@@ -23,7 +23,7 @@ const DataCube& frame() {
 void BM_RangeDopplerFft(benchmark::State& state) {
   RadarConfig cfg;
   RangeDopplerProcessor rd(cfg);
-  DataCube spec(cfg.num_rx, cfg.chirps_per_frame, cfg.samples_per_chirp);
+  DataCube spec(cfg.num_virtual(), cfg.chirps_per_frame, cfg.samples_per_chirp);
   const DataCube& adc = frame();  // simulate outside the timed loop
   for (auto _ : state) {
     rd.process(adc, spec);
@@ -54,7 +54,7 @@ void BM_CaCfar2D(benchmark::State& state) {
   Grid2D<float> power;
   integrate_power(spec, power);
   CfarConfig cc;
-  cc.num_looks = cfg.num_rx;
+  cc.num_looks = cfg.num_virtual();
   CaCfar2D cfar(cc);
   std::vector<CfarCell> cells;
   for (auto _ : state) {
@@ -75,6 +75,20 @@ void BM_FullPipeline(benchmark::State& state) {
   }
 }
 BENCHMARK(BM_FullPipeline)->Unit(benchmark::kMicrosecond);
+
+// 3 Tx x 4 Rx: 12 channels, three velocity hypotheses per CFAR cell.
+void BM_FullPipelineMimo(benchmark::State& state) {
+  const RadarConfig cfg = RadarConfig::tdm_mimo_3tx4rx();
+  Simulator sim{cfg};
+  const DataCube adc = sim.simulate_frame(scene());
+  RadarPipeline pipe{cfg};
+  FrameResult res;
+  for (auto _ : state) {
+    pipe.process(adc, res);
+    benchmark::DoNotOptimize(res.detections.data());
+  }
+}
+BENCHMARK(BM_FullPipelineMimo)->Unit(benchmark::kMicrosecond);
 
 }  // namespace
 

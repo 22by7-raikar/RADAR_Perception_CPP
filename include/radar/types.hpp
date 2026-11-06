@@ -93,12 +93,19 @@ struct Detection {
   float range_m = 0.0f;
   float velocity_mps = 0.0f;
   float azimuth_rad = 0.0f;
+  float elevation_rad = 0.0f;  ///< 0 unless the array measures elevation
+  /// 1-sigma elevation uncertainty from SNR; infinite without elevation.
+  float elevation_std_rad = 0.0f;
   float x_m = 0.0f;
   float y_m = 0.0f;
+  float z_m = 0.0f;
   float snr_db = 0.0f;
   float rcs_dbsm = 0.0f;  ///< from SNR and range via the calibrated RCS offset
   std::size_t range_bin = 0;
   std::size_t doppler_bin = 0;
+  /// TDM-MIMO velocity unfolding: velocity = folded Doppler velocity +
+  /// doppler_fold * 2 * max_velocity().
+  int doppler_fold = 0;
 };
 
 }  // namespace radar

@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <map>
+#include <random>
 #include <sstream>
 #include <string>
 
@@ -151,6 +152,76 @@ TEST(Regression, PointCloud) {
   check("point_cloud.velocity_mae_mps", ev / n);
   check("point_cloud.azimuth_mae_deg", ea / n);
   if (!skip_timing()) check("point_cloud.latency_mean_ms", latency / frames);
+}
+
+// TDM-MIMO 3 Tx x 4 Rx: random targets across the full unfolded velocity span
+// (+/-70 m/s, three times the TDM Doppler span) and +/-12 deg elevation.
+TEST(Regression, Mimo) {
+  const RadarConfig radar = RadarConfig::tdm_mimo_3tx4rx();
+  SimulatorConfig sc;
+  sc.seed = 21;
+  Simulator sim(radar, sc);
+  RadarPipeline pipe(radar);
+  PipelineConfig no_comp;
+  no_comp.tdm_motion_compensation = false;
+  RadarPipeline pipe_uncompensated(radar, no_comp);
+
+  std::mt19937 rng(5);
+  std::uniform_real_distribution<double> vel(-65.0, 65.0), az(-45.0, 45.0), el(-12.0, 12.0),
+      rcs(5.0, 15.0);
+  std::size_t tp = 0, fn = 0, fp = 0, unfolded = 0, moving = 0;
+  double er = 0, ev = 0, ea = 0, ee = 0, ea_uncomp = 0;
+  std::size_t tp_uncomp = 0;
+  DataCube adc;
+  FrameResult res;
+  const int frames = 40;
+  for (int f = 0; f < frames; ++f) {
+    // Four targets, 25 m apart in range so they never share a cell.
+    std::vector<Target> truth;
+    for (int i = 0; i < 4; ++i) {
+      Target t;
+      t.range_m = 15.0 + 25.0 * i + 10.0 * std::uniform_real_distribution<double>(0, 1)(rng);
+      t.velocity_mps = vel(rng);
+      t.azimuth_rad = az(rng) * kDeg;
+      t.elevation_rad = el(rng) * kDeg;
+      t.rcs_dbsm = rcs(rng);
+      truth.push_back(t);
+    }
+    sim.simulate_frame(truth, adc);
+    pipe.process(adc, res);
+    MatchGates gates;
+    gates.velocity_mps = 1.0;  // a wrong unfold is 46 m/s off: counts as missed
+    const auto e = evaluate(truth, res.detections, gates);
+    tp += e.true_positives;
+    fn += e.false_negatives;
+    fp += e.false_positives;
+    const double n = static_cast<double>(e.true_positives);
+    er += e.mean_abs_range_error_m * n;
+    ev += e.mean_abs_velocity_error_mps * n;
+    ea += e.mean_abs_azimuth_error_deg * n;
+    ee += e.mean_abs_elevation_error_deg * n;
+    for (std::size_t i = 0; i < truth.size(); ++i) {
+      if (std::abs(truth[i].velocity_mps) < radar.max_velocity()) continue;
+      ++moving;  // only these need unfolding
+      if (e.truth_to_detection[i] >= 0) ++unfolded;
+    }
+
+    pipe_uncompensated.process(adc, res);
+    MatchGates loose;
+    loose.velocity_mps = 2.0 * radar.max_unfolded_velocity();  // velocity is folded here
+    const auto u = evaluate(truth, res.detections, loose);
+    tp_uncomp += u.true_positives;
+    ea_uncomp += u.mean_abs_azimuth_error_deg * static_cast<double>(u.true_positives);
+  }
+  const double n = static_cast<double>(tp);
+  check("mimo.detection_rate", n / static_cast<double>(tp + fn));
+  check("mimo.false_alarms_per_frame", static_cast<double>(fp) / frames);
+  check("mimo.unfold_success_rate", static_cast<double>(unfolded) / static_cast<double>(moving));
+  check("mimo.range_mae_m", er / n);
+  check("mimo.velocity_mae_mps", ev / n);
+  check("mimo.azimuth_mae_deg", ea / n);
+  check("mimo.elevation_mae_deg", ee / n);
+  check("mimo.uncompensated_azimuth_mae_deg", ea_uncomp / static_cast<double>(tp_uncomp));
 }
 
 TEST(Regression, Tracking) {

@@ -5,8 +5,10 @@
 #include <geometry_msgs/msg/quaternion.hpp>
 #include <radar_perception_msgs/msg/radar_cube.hpp>
 #include <rclcpp/time.hpp>
+#include <stdexcept>
 #include <string>
 
+#include "radar/config.hpp"
 #include "radar/geometry.hpp"
 #include "radar/types.hpp"
 
@@ -21,6 +23,13 @@ inline geometry_msgs::msg::Quaternion yaw_to_quaternion(double yaw) {
 
 inline double quaternion_to_yaw(const geometry_msgs::msg::Quaternion& q) {
   return std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+}
+
+/// Antenna layout by name, shared by the source and the perception node.
+inline radar::RadarConfig radar_config(const std::string& name) {
+  if (name == "ula_8rx") return radar::RadarConfig{};
+  if (name == "tdm_mimo_3tx4rx") return radar::RadarConfig::tdm_mimo_3tx4rx();
+  throw std::invalid_argument("unknown array '" + name + "' (ula_8rx | tdm_mimo_3tx4rx)");
 }
 
 inline double to_seconds(const builtin_interfaces::msg::Time& t) {

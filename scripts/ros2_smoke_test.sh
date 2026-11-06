@@ -9,7 +9,8 @@ set -u
 
 # Own process group so the whole launch tree can be stopped. (Background jobs
 # in a non-interactive shell ignore SIGINT, so SIGINT alone would not stop it.)
-setsid ros2 launch radar_perception_ros demo.launch.py duration:=20.0 > launch.log 2>&1 &
+# Extra arguments are passed to the launch file (e.g. array:=tdm_mimo_3tx4rx).
+setsid ros2 launch radar_perception_ros demo.launch.py duration:=20.0 "$@" > launch.log 2>&1 &
 LAUNCH_PID=$!
 cleanup() {
   kill -TERM -- "-$LAUNCH_PID" 2>/dev/null || true

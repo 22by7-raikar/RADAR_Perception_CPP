@@ -15,6 +15,7 @@ struct Target {
   double velocity_mps = 0.0;  ///< range rate, negative = approaching
   double azimuth_rad = 0.0;   ///< counter-clockwise from boresight (+x)
   double rcs_dbsm = 10.0;
+  double elevation_rad = 0.0;  ///< above the sensor's horizontal plane
 };
 
 struct SimulatorConfig {
@@ -30,9 +31,12 @@ struct SimulatorConfig {
 /// Synthesises the dechirped IQ beat signal of an FMCW radar.
 ///
 /// Each sample uses the exact round-trip delay
-///   tau = 2 (R0 + v t) / c - k d sin(az) / c   (t from the frame start)
-/// and the dechirped phase 2 pi (fc tau + S t_fast tau - S tau^2 / 2),
-/// so range migration and range-Doppler coupling are included.
+///   tau = 2 (R0 + v t) / c - lambda (y u + z w) / c   (t from the frame start)
+/// where (y, z) is the virtual element position in wavelengths,
+/// u = cos(el) sin(az) and w = sin(el), and the dechirped phase
+/// 2 pi (fc tau + S t_fast tau - S tau^2 / 2). Range migration, range-Doppler
+/// coupling and the TDM-MIMO chirp timing (Tx t transmits at offset t * Tc in
+/// every loop) are therefore all included.
 class Simulator {
  public:
   Simulator(const RadarConfig& radar, const SimulatorConfig& sim = {});
